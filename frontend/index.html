@@ -3,15 +3,97 @@
 <head>
   <meta charset="UTF-8" />
   <title>AI Interviewer – Day 1 Test</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f4f8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      padding: 40px 20px;
+      color: #333;
+    }
+
+    h2 {
+      color: #1f2937;
+      margin-bottom: 10px;
+    }
+
+    h3 {
+      margin-top: 30px;
+      margin-bottom: 10px;
+      color: #111827;
+    }
+
+    button {
+      padding: 12px 25px;
+      margin: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    #start {
+      background-color: #4f46e5;
+      color: white;
+    }
+
+    #start:hover:enabled {
+      background-color: #4338ca;
+    }
+
+    #stop {
+      background-color: #ef4444;
+      color: white;
+    }
+
+    #stop:hover:enabled {
+      background-color: #b91c1c;
+    }
+
+    #start:disabled,
+    #stop:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #output {
+      width: 100%;
+      max-width: 600px;
+      min-height: 150px;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      font-size: 16px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .buttons {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+  </style>
 </head>
 <body>
-  <h2>Day-1 Mic Streaming Test</h2>
+  <h2>🎤 AI Interviewer – Mic Streaming Test</h2>
 
-  <button id="start">Start Recording</button>
-  <button id="stop" disabled>Stop Recording</button>
+  <div class="buttons">
+    <button id="start">Start Recording</button>
+    <button id="stop" disabled>Stop Recording</button>
+  </div>
 
   <h3>Transcript</h3>
-  <pre id="output"></pre>
+  <pre id="output">Your transcript will appear here...</pre>
 
   <script>
     let ws;
