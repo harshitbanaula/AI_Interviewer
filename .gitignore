@@ -1,0 +1,6 @@
+.env
+myenv
+recordings
+__pycache__/
+*.pyc
+.vscode/
