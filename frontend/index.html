@@ -1,172 +1,4 @@
-  <!-- <!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>AI Interviewer BOT</title>
-    <style>
-      body {
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        background: #f0f4f8;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
-        min-height: 100vh;
-        padding: 40px 20px;
-        color: #333;
-      }
-
-      h2 {
-        color: #1f2937;
-        margin-bottom: 10px;
-      }
-
-      h3 {
-        margin-top: 30px;
-        margin-bottom: 10px;
-        color: #111827;
-      }
-
-      button {
-        padding: 12px 25px;
-        margin: 10px;
-        font-size: 16px;
-        font-weight: 600;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-      }
-
-      #start {
-        background-color: #4f46e5;
-        color: white;
-      }
-
-      #start:hover:enabled {
-        background-color: #4338ca;
-      }
-
-      #stop {
-        background-color: #ef4444;
-        color: white;
-      }
-
-      #stop:hover:enabled {
-        background-color: #b91c1c;
-      }
-
-      #start:disabled,
-      #stop:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
-      #output {
-        width: 100%;
-        max-width: 600px;
-        min-height: 150px;
-        background: white;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-        font-size: 16px;
-        line-height: 1.5;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-      }
-
-      .buttons {
-        display: flex;
-        justify-content: center;
-        gap: 15px;
-        margin-bottom: 20px;
-      }
-    </style>
-  </head>
-  <body>
-    <h2>AI Interviewer – Mic Streaming Test</h2>
-
-    <div class="buttons">
-      <button id="start">Start Recording</button>
-      <button id="stop" disabled>Stop Recording</button>
-    </div>
-
-    <h3>Transcript</h3>
-    <pre id="output">Your transcript will appear here...</pre>
-
-    <script>
-      let ws;
-      let audioContext;
-      let processor;
-      let source;
-      let stream;
-
-      const output = document.getElementById("output");
-
-      document.getElementById("start").onclick = async () => {
-        ws = new WebSocket("ws://localhost:8000/ws");
-        ws.binaryType = "arraybuffer";
-
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          if (data.type == "PARTIAL_TRANSCRIPT"){
-            output.innerText = data.text;
-          }
-          if (data.type == "TRANSCRIPT"){
-            output.innerText = data.text;
-          }
-        };
-
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        audioContext = new AudioContext({ sampleRate: 16000 });
-        source = audioContext.createMediaStreamSource(stream);
-
-        processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-        processor.onaudioprocess = (e) => {
-          const input = e.inputBuffer.getChannelData(0);
-          const buffer = new ArrayBuffer(input.length * 2);
-          const view = new DataView(buffer);
-
-          let offset = 0;
-          for (let i = 0; i < input.length; i++, offset += 2) {
-            let sample = Math.max(-1, Math.min(1, input[i]));
-            view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-          }
-
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(buffer);
-          }
-        };
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-
-        document.getElementById("start").disabled = true;
-        document.getElementById("stop").disabled = false;
-      };
-
-      document.getElementById("stop").onclick = () => {
-        ws.send(JSON.stringify({ type: "END" }));
-
-        processor.disconnect();
-        source.disconnect();
-        stream.getTracks().forEach(t => t.stop());
-
-        document.getElementById("start").disabled = false;
-        document.getElementById("stop").disabled = true;
-      };
-    </script>
-  </body>
-  </html> -->
-
-
-
-
-
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -279,6 +111,294 @@
       stopBtn.disabled = true;
       window.stopInterview();
     }
+  </script>
+</body>
+</html>
+
+
+
+ -->
+<!-- 
+
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Interviewer – Live Transcript & Feedback</title>
+
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f4f8;
+      min-height: 100vh;
+      margin: 0;
+      padding: 40px 20px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      color: #1f2937;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 700px;
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+      color: #111827;
+    }
+
+    .buttons {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    #startBtn {
+      background-color: #4f46e5;
+      color: white;
+    }
+
+    #stopBtn {
+      background-color: #ef4444;
+      color: white;
+    }
+
+    #stopBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .box {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 15px;
+      min-height: 150px;
+      font-size: 16px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+
+    .title {
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .hint {
+      text-align: center;
+      font-size: 14px;
+      color: #6b7280;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h2>🎙️ AI Interviewer</h2>
+
+    <div class="buttons">
+      <button id="startBtn" onclick="start()">Start Interview</button>
+      <button id="stopBtn" onclick="stop()" disabled>Stop</button>
+    </div>
+
+    <div class="title">Live Transcript</div>
+    <div id="transcript" class="box">
+      Your live transcript will appear here...
+    </div>
+
+    <div class="feedback-title">💡 Feedback:</div>
+    <div id="feedback" class="feedback-box">
+      Feedback will appear here after the interview.
+    </div>
+
+
+    <div class="hint">
+      Speak naturally. The AI evaluates your answer in real time.
+    </div>
+  </div>
+
+  <script src="audio.js"></script>
+
+  <script>
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+
+    function start() {
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      window.startInterview();
+    }
+
+    function stop() {
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      window.stopInterview();
+    }
+  </script>
+</body>
+</html> -->
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Interviewer – Live Transcript & Feedback</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f4f8;
+      min-height: 100vh;
+      margin: 0;
+      padding: 40px 20px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      color: #1f2937;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 700px;
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+      color: #111827;
+    }
+
+    .buttons {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    #startBtn {
+      background-color: #4f46e5;
+      color: white;
+    }
+
+    #startBtn:hover {
+      background-color: #4338ca;
+    }
+
+    #stopBtn {
+      background-color: #ef4444;
+      color: white;
+    }
+
+    #stopBtn:hover {
+      background-color: #b91c1c;
+    }
+
+    #stopBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .transcript-box, .feedback-box {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 15px;
+      min-height: 180px;
+      font-size: 16px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+
+    .hint {
+      text-align: center;
+      margin-top: 15px;
+      font-size: 14px;
+      color: #6b7280;
+    }
+
+    .feedback-title {
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🎙️ AI Interviewer – Live Transcript & Feedback</h2>
+
+    <div class="buttons">
+      <button id="startBtn">Start Interview</button>
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div id="transcript" class="transcript-box">
+      Your live transcript will appear here...
+    </div>
+
+    <div class="feedback-title">💡 Feedback:</div>
+    <div id="feedback" class="feedback-box">
+      Feedback will appear here after the interview.
+    </div>
+
+    <div class="hint">
+      Click <b>Start Interview</b>, speak clearly, and see text appear live. Feedback will be generated automatically.
+    </div>
+  </div>
+
+  <script src="audio.js"></script>
+  <script>
+    // Buttons
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+
+    startBtn.addEventListener("click", async () => {
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      document.getElementById("transcript").textContent = "";
+      document.getElementById("feedback").textContent = "Feedback will appear here after the interview.";
+      await window.startInterview();
+    });
+
+    stopBtn.addEventListener("click", () => {
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      window.stopInterview();
+    });
   </script>
 </body>
 </html>

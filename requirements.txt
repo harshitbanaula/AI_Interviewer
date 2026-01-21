@@ -17,4 +17,9 @@ aiofiles
 httpx
 aiortc
 langchain-community
+langchain-core
+langchain-huggingface
+huggingface-hub
+sentence-transformers
+
 
