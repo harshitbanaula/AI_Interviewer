@@ -8,6 +8,9 @@ os.makedirs(RECORDINGS_DIR, exist_ok=True)
 class AudioBuffer:
     def __init__(self):
         self.frames = []
+    
+    def reset(self):
+        self.frames = []
 
     def add(self, chunk: bytes):
         self.frames.append(chunk)
