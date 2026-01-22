@@ -103,7 +103,7 @@ LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.1))
 if not HF_TOKEN:
     raise RuntimeError("HF_TOKEN missing")
 
-# 1 Create HF endpoint (provider-level)
+# Initiliaze 
 hf_endpoint = HuggingFaceEndpoint(
     repo_id=HF_MODEL_ID,
     task="conversational",
@@ -112,16 +112,16 @@ hf_endpoint = HuggingFaceEndpoint(
     max_new_tokens=200,
 )
 
-# 2 Wrap it as a CHAT model ✅
+# CHAT model 
 llm = ChatHuggingFace(llm=hf_endpoint)
 
-# 3 Chat prompt (NOT PromptTemplate)
+#  Chat prompt
 prompt = ChatPromptTemplate.from_messages([
     ("system", "You are an AI interviewer. Give short, constructive feedback."),
     ("human", "{answer_text}")
 ])
 
-# 4LCEL pipe
+
 feedback_chain = prompt | llm | StrOutputParser()
 
 def get_feedback(answer_text: str) -> str:
