@@ -22,4 +22,6 @@ langchain-huggingface
 huggingface-hub
 sentence-transformers
 
+pypdf
+python-docx
 
