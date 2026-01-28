@@ -1,128 +1,110 @@
-# import os
-# from langchain_huggingface import HuggingFaceEndpoint
-# from langchain_core.prompts import PromptTemplate
-# from langchain_core.output_parsers import StrOutputParser
 
-# # Configuration from environment variables
-# HF_TOKEN = os.getenv("HF_TOKEN")
-# HF_MODEL_ID = os.getenv("HF_MODEL_ID", "mistralai/Mistral-7B-Instruct-v0.2")
-# LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.1))
-
-# # 1. Initialize the modern HuggingFaceEndpoint
-# # In 2026, task="text-generation" is the standard for completion models
-# # llm = HuggingFaceEndpoint(
-# #     repo_id=HF_MODEL_ID,
-# #     task="text-generation",
-# #     huggingfacehub_api_token=HF_TOKEN,
-# #     temperature=LLM_TEMPERATURE,
-# #     max_new_tokens=200,
-# # )
-# llm = HuggingFaceEndpoint(
-#     repo_id=HF_MODEL_ID,
-#     task="text-generation",
-#     huggingfacehub_api_token=HF_TOKEN,
-#     temperature=LLM_TEMPERATURE,
-#     max_new_tokens=200,
-# )
-# # 2. Define the Prompt Template using the standard core module
-# prompt = PromptTemplate.from_template(
-#     "You are an AI interviewer.\n"
-#     "Evaluate the following answer and provide constructive feedback:\n\n"
-#     "{answer_text}\n\n"
-#     "Provide short, clear suggestions."
-# )
-
-# # 3. Construct the Chain using LCEL (replaces ExecutionChain)
-# # This uses the pipe operator to connect the prompt, model, and output parser
-# feedback_chain = prompt | llm | StrOutputParser()
-
-# def get_feedback(answer_text: str) -> str:
-#     """
-#     Invoke the feedback chain with the provided answer text.
-#     """
-#     # In 2026, use .invoke() for standard execution
-#     return feedback_chain.invoke({"answer_text": answer_text})
-
-
-
-
-# backend/app/services/evaluator.py
-# import os
-# from dotenv import load_dotenv
-# load_dotenv()
-# print("HF_MODEL_ID =", os.getenv("HF_MODEL_ID"))
-# import os
-# from langchain_huggingface import HuggingFaceEndpoint
-# from langchain_core.prompts import ChatPromptTemplate
-# from langchain_core.output_parsers import StrOutputParser
-# from langchain_core.messages import (
-#     SystemMessage,
-#     HumanMessage,
-# )
-
-# HF_TOKEN = os.getenv("HF_TOKEN")
-# HF_MODEL_ID = os.getenv("HF_MODEL_ID")
-# LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.1))
-
-# llm = HuggingFaceEndpoint(
-#     repo_id=HF_MODEL_ID,
-#     task="conversational",  # use chat
-#     huggingfacehub_api_token=HF_TOKEN,
-#     temperature=LLM_TEMPERATURE,
-#     max_new_tokens=200,
-# )
-
-# # Chat prompt
-# template = ChatPromptTemplate.from_messages([
-#     SystemMessage(content="You are an AI interviewer providing concise feedback."),
-#     HumanMessage(content="{answer_text}")
-# ])
-
-# feedback_chain = template | llm | StrOutputParser()
-
-# def get_feedback(answer_text: str) -> str:
-#     return feedback_chain.invoke({"answer_text": answer_text})
 
 
 
 
 # backend/app/services/evaluator.py
 import os
+import json
 from dotenv import load_dotenv
-
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
+from langchain_groq import ChatGroq
 load_dotenv()
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-HF_MODEL_ID = os.getenv("HF_MODEL_ID", "mistralai/Mistral-7B-Instruct-v0.2")
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.1))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL_ID = os.getenv("GROQ_MODEL_ID", "llama-3.1-8b-instant")
 
-if not HF_TOKEN:
-    raise RuntimeError("HF_TOKEN missing")
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY missing")
 
-# Initiliaze 
-hf_endpoint = HuggingFaceEndpoint(
-    repo_id=HF_MODEL_ID,
-    task="conversational",
-    huggingfacehub_api_token=HF_TOKEN,
-    temperature=LLM_TEMPERATURE,
-    max_new_tokens=200,
+# ----------------------------
+# LLM (Advisory Only)
+# ----------------------------
+llm = ChatGroq(
+    api_key=GROQ_API_KEY,
+    model=GROQ_MODEL_ID,
+    temperature=0.1,
+    max_tokens=250,
 )
 
-# CHAT model 
-llm = ChatHuggingFace(llm=hf_endpoint)
+# HF_TOKEN = os.getenv("HF_TOKEN")
+# HF_MODEL_ID = os.getenv("HF_MODEL_ID")
+# if not HF_TOKEN:
+#     raise RuntimeError("HF_TOKEN missing")
 
-#  Chat prompt
+# hf_endpoint = HuggingFaceEndpoint(
+#     repo_id=HF_MODEL_ID,
+#     task="conversational",
+#     huggingfacehub_api_token=HF_TOKEN,
+#     temperature=0.3,
+#     max_new_tokens=400,
+# )
+
+# llm = ChatHuggingFace(llm=hf_endpoint)
+
+
+# ----------------------------
+# Prompt
+# ----------------------------
 prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an AI interviewer. Give short, constructive feedback."),
-    ("human", "{answer_text}")
+    ("system", "You are an AI interviewer. Suggest evaluation as JSON only."),
+    ("human", """
+Evaluate this answer and suggest:
+
+{
+  "strengths": ["..."],
+  "improvements": ["..."]
+}
+
+Answer:
+{answer_text}
+""")
 ])
 
+chain = prompt | llm | StrOutputParser()
 
-feedback_chain = prompt | llm | StrOutputParser()
+# ----------------------------
+# Backend Scoring (FINAL AUTHORITY)
+# ----------------------------
+WEIGHTS = {
+    "correctness": 0.5,
+    "depth": 0.3,
+    "clarity": 0.2
+}
 
-def get_feedback(answer_text: str) -> str:
-    return feedback_chain.invoke({"answer_text": answer_text})
+def score_answer(answer_text: str) -> dict:
+    """
+    Backend-controlled scoring.
+    LLM is advisory for feedback only.
+    """
+
+    words = len(answer_text.split())
+
+    correctness = min(words / 50, 1.0)
+    depth = min(words / 80, 1.0)
+    clarity = 1.0 if words <= 100 else max(0.5, 100 / words)
+
+    final_score = round(
+        correctness * WEIGHTS["correctness"] +
+        depth * WEIGHTS["depth"] +
+        clarity * WEIGHTS["clarity"],
+        2
+    )
+
+    # LLM advisory feedback
+    try:
+        raw = chain.invoke({"answer_text": answer_text})
+        advisory = json.loads(raw)
+    except Exception:
+        advisory = {"strengths": [], "improvements": []}
+
+    return {
+        "correctness": round(correctness, 2),
+        "depth": round(depth, 2),
+        "clarity": round(clarity, 2),
+        "final_score": final_score,
+        "strengths": advisory.get("strengths", []),
+        "improvements": advisory.get("improvements", [])
+    }

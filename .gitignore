@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 .vscode/
 abc.py
+parsing_test.py

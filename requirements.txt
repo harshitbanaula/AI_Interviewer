@@ -25,3 +25,4 @@ sentence-transformers
 pypdf
 python-docx
 
+langchain-groq

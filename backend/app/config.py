@@ -12,6 +12,9 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 HF_MODEL_ID = os.getenv("HF_MODEL_ID")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", 0.0))
 
+Groq_API_Key = os.getenv("GROQ_API_KEY")
+GROQ_MODEL_ID = os.getenv("GROQ_MODEL_ID")
+
 # TTS
 TTS_MODEL = os.getenv("TTS_MODEL")
 
