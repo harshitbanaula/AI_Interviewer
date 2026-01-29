@@ -21,8 +21,12 @@ langchain-core
 langchain-huggingface
 huggingface-hub
 sentence-transformers
-
 pypdf
 python-docx
-
 langchain-groq
+
+# for speech to text
+torchaudio
+soundfile 
+numpy
+phonemizer
