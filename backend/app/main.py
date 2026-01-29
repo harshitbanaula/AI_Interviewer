@@ -1,6 +1,4 @@
-
-
-
+# backend/app/main.py
 
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +23,6 @@ app.add_middleware(
 from app.routers.upload import router as upload_router
 
 app.include_router(upload_router)
-
 app.include_router(ws_router)
 
 @app.get("/")
