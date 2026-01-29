@@ -414,6 +414,403 @@
 // submitBtn.addEventListener("click", submitAnswer);
 
 
+
+
+
+
+
+
+
+// // frontend/audio.js
+// let audioContext = null;
+// let processor = null;
+// let source = null;
+// let stream = null;
+// let isRunning = false;
+// let sessionId = null;
+// let silenceTimeout;
+// let ws;
+
+// // Buttons
+// const resumeInput = document.getElementById("resumeFile");
+// const startBtn = document.getElementById("startBtn");
+// const stopBtn = document.getElementById("stopBtn");
+// const submitBtn = document.getElementById("submitBtn");
+
+// // Enable start button after file selection
+// resumeInput.addEventListener("change", () => {
+//   startBtn.disabled = false;
+// });
+
+// // Upload resume & create session
+// async function uploadResume() {
+//   const file = resumeInput.files[0];
+//   if (!file) return null;
+
+//   const formData = new FormData();
+//   formData.append("file", file);
+//   formData.append("job_description", "Python Developer");
+
+//   const response = await fetch("http://localhost:8000/upload_resume", {
+//     method: "POST",
+//     body: formData
+//   });
+
+//   if (response.ok) {
+//     const data = await response.json();
+//     return data.session_id;
+//   } else {
+//     alert("Resume upload failed!");
+//     return null;
+//   }
+// }
+
+// // Start interview
+// async function startInterview() {
+//   if (isRunning) return;
+//   isRunning = true;
+
+//   sessionId = await uploadResume();
+//   if (!sessionId) { isRunning = false; return; }
+
+//   const transcriptDiv = document.getElementById("transcript");
+//   const feedbackDiv = document.getElementById("feedback");
+
+//   transcriptDiv.textContent = "";
+//   feedbackDiv.textContent = "Feedback will appear here after the interview.";
+
+//   ws = new WebSocket(`ws://localhost:8000/ws/interview?session_id=${sessionId}`);
+
+//   ws.onopen = () => console.log("WebSocket connected");
+
+//   ws.onmessage = (event) => {
+//     const data = JSON.parse(event.data);
+
+//     if (data.type === "QUESTION") {
+//       transcriptDiv.textContent += "\n\n Question: " + data.text + "\n";
+//       transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+//       resetSilenceTimer();
+//     }
+
+//     if (data.type === "FINAL_TRANSCRIPT") {
+//       transcriptDiv.textContent += "\n" + data.text;
+//       transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+//     }
+
+//     if (data.type === "END" && data.summary) {
+//       const summaryDiv = document.createElement("div");
+//       summaryDiv.style.background = "#f3f4f6";
+//       summaryDiv.style.border = "1px solid #d1d5db";
+//       summaryDiv.style.borderRadius = "8px";
+//       summaryDiv.style.padding = "10px";
+//       summaryDiv.style.marginTop = "15px";
+
+//       let summaryText = `Final Interview Summary:\n\nAverage Score: ${data.summary.average_score}\nResult: ${data.summary.result}\n\n`;
+
+//       data.summary.questions.forEach((q, i) => {
+//         summaryText += `Q${i + 1}: ${q}\nAnswer: ${data.summary.answers[i]}\nScores → Correctness: ${data.summary.scores[i].correctness}, Depth: ${data.summary.scores[i].depth}, Clarity: ${data.summary.scores[i].clarity}, Final: ${data.summary.scores[i].final_score}\n\n`;
+//       });
+
+//       // LLM-generated feedback
+//       if (data.summary.feedback) {
+//         summaryText += `Feedback:\n${data.summary.feedback}\n`;
+//       }
+
+//       summaryDiv.textContent = summaryText;
+//       transcriptDiv.appendChild(summaryDiv);
+
+//       startBtn.disabled = false;
+//       stopBtn.disabled = true;
+//       submitBtn.disabled = true;
+//       isRunning = false;
+//     }
+
+//     if (data.type === "ERROR") {
+//       alert(data.text);
+//       isRunning = false;
+//     }
+//   };
+
+//   ws.onclose = () => { console.log("WebSocket closed"); isRunning = false; };
+
+//   // Audio setup
+//   audioContext = new AudioContext({ sampleRate: 16000 });
+//   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+//   source = audioContext.createMediaStreamSource(stream);
+//   processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+//   processor.onaudioprocess = (e) => {
+//     if (!isRunning) return;
+//     const input = e.inputBuffer.getChannelData(0);
+//     if (ws && ws.readyState === WebSocket.OPEN) ws.send(input.buffer);
+//     resetSilenceTimer();
+//   };
+
+//   source.connect(processor);
+//   processor.connect(audioContext.destination);
+
+//   stopBtn.disabled = false;
+//   submitBtn.disabled = false;
+// }
+
+// // Stop interview
+// function stopInterview() {
+//   if (!isRunning) return;
+//   isRunning = false;
+
+//   if (ws && ws.readyState === WebSocket.OPEN) {
+//     ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
+//     ws.close();
+//   }
+
+//   if (processor) processor.disconnect();
+//   if (source) source.disconnect();
+//   if (audioContext) audioContext.close();
+//   if (stream) stream.getTracks().forEach(track => track.stop());
+
+//   startBtn.disabled = false;
+//   stopBtn.disabled = true;
+//   submitBtn.disabled = true;
+// }
+
+// // Submit answer manually
+// function submitAnswer() {
+//   if (!isRunning) return;
+//   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
+//   resetSilenceTimer();
+// }
+
+// // Silence detection
+// function resetSilenceTimer() {
+//   clearTimeout(silenceTimeout);
+//   silenceTimeout = setTimeout(() => {
+//     if (isRunning) submitAnswer();
+//   }, 10000);
+// }
+
+// startBtn.addEventListener("click", async () => {
+//   startBtn.disabled = true;
+//   stopBtn.disabled = false;
+//   submitBtn.disabled = false;
+//   await startInterview();
+// });
+
+// stopBtn.addEventListener("click", stopInterview);
+// submitBtn.addEventListener("click", submitAnswer);
+
+// // frontend/audio.js
+
+// let audioContext = null;
+// let processor = null;
+// let source = null;
+// let stream = null;
+// let isRunning = false;
+// let sessionId = null;
+// let silenceTimeout;
+// let ws;
+
+// // Buttons
+// const resumeInput = document.getElementById("resumeFile");
+// const startBtn = document.getElementById("startBtn");
+// const stopBtn = document.getElementById("stopBtn");
+// const submitBtn = document.getElementById("submitBtn");
+
+// // Enable start button after file selection
+// resumeInput.addEventListener("change", () => startBtn.disabled = false);
+
+// // Upload resume & create session
+// async function uploadResume() {
+//     const file = resumeInput.files[0];
+//     if (!file) return null;
+
+//     const formData = new FormData();
+//     formData.append("file", file);
+//     formData.append("job_description", "Python Developer");
+
+//     const response = await fetch("http://localhost:8000/upload_resume", {
+//         method: "POST",
+//         body: formData
+//     });
+
+//     if (response.ok) {
+//         const data = await response.json();
+//         return data.session_id;
+//     } else {
+//         alert("Resume upload failed!");
+//         return null;
+//     }
+// }
+
+// // Play WAV audio from server
+// function playAudioBytes(bytes) {
+//     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+//     audioCtx.decodeAudioData(bytes.slice(0), (buffer) => {
+//         const source = audioCtx.createBufferSource();
+//         source.buffer = buffer;
+//         source.connect(audioCtx.destination);
+//         source.start(0);
+//     });
+// }
+
+// // Start interview
+// async function startInterview() {
+//     if (isRunning) return;
+//     isRunning = true;
+
+//     sessionId = await uploadResume();
+//     if (!sessionId) { isRunning = false; return; }
+
+//     const transcriptDiv = document.getElementById("transcript");
+//     const feedbackDiv = document.getElementById("feedback");
+
+//     transcriptDiv.textContent = "";
+//     feedbackDiv.textContent = "Feedback will appear here after the interview.";
+
+//     ws = new WebSocket(`ws://localhost:8000/ws/interview?session_id=${sessionId}`);
+
+//     ws.onopen = () => console.log("WebSocket connected");
+
+//     ws.onmessage = (event) => {
+//         if (typeof event.data === "string") {
+//             const data = JSON.parse(event.data);
+
+//             if (data.type === "QUESTION") {
+//                 transcriptDiv.textContent += "\n\n Question: " + data.text + "\n";
+//                 transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+//                 resetSilenceTimer();
+//             }
+
+//             if (data.type === "FINAL_TRANSCRIPT") {
+//                 transcriptDiv.textContent += "\n" + data.text;
+//                 transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+//             }
+
+//             if (data.type === "END" && data.summary) {
+//                 const summaryDiv = document.createElement("div");
+//                 summaryDiv.style.background = "#f3f4f6";
+//                 summaryDiv.style.border = "1px solid #d1d5db";
+//                 summaryDiv.style.borderRadius = "8px";
+//                 summaryDiv.style.padding = "10px";
+//                 summaryDiv.style.marginTop = "15px";
+
+//                 let summaryText = `Final Interview Summary:\n\nAverage Score: ${data.summary.average_score}\nResult: ${data.summary.result}\n\n`;
+
+//                 data.summary.questions.forEach((q, i) => {
+//                     summaryText += `Q${i + 1}: ${q}\nAnswer: ${data.summary.answers[i]}\nScores → Correctness: ${data.summary.scores[i].correctness}, Depth: ${data.summary.scores[i].depth}, Clarity: ${data.summary.scores[i].clarity}, Final: ${data.summary.scores[i].final_score}\n\n`;
+//                 });
+
+//                 if (data.summary.feedback) {
+//                     summaryText += `Feedback:\n${data.summary.feedback}\n`;
+//                 }
+
+//                 summaryDiv.textContent = summaryText;
+//                 transcriptDiv.appendChild(summaryDiv);
+
+//                 startBtn.disabled = false;
+//                 stopBtn.disabled = true;
+//                 submitBtn.disabled = true;
+//                 isRunning = false;
+//             }
+
+//             if (data.type === "ERROR") {
+//                 alert(data.text);
+//                 isRunning = false;
+//             }
+//         } else if (event.data instanceof Blob) {
+//             // Play audio bytes
+//             const reader = new FileReader();
+//             reader.onload = function() {
+//                 const arrayBuffer = reader.result;
+//                 playAudioBytes(arrayBuffer);
+//             };
+//             reader.readAsArrayBuffer(event.data);
+//         }
+//     };
+
+//     ws.onclose = () => { console.log("WebSocket closed"); isRunning = false; };
+
+//     // Audio setup
+//     audioContext = new AudioContext({ sampleRate: 16000 });
+//     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+//     source = audioContext.createMediaStreamSource(stream);
+//     processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+//     processor.onaudioprocess = (e) => {
+//         if (!isRunning) return;
+//         const input = e.inputBuffer.getChannelData(0);
+//         if (ws && ws.readyState === WebSocket.OPEN) ws.send(input.buffer);
+//         resetSilenceTimer();
+//     };
+
+//     source.connect(processor);
+//     processor.connect(audioContext.destination);
+
+//     stopBtn.disabled = false;
+//     submitBtn.disabled = false;
+// }
+
+// // Stop interview
+// // Stop interview
+// function stopInterview() {
+//     if (!isRunning) return;
+//     isRunning = false;
+
+//     if (ws && ws.readyState === WebSocket.OPEN) {
+//         try {
+//             ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
+//         } catch (err) {
+//             console.log("WebSocket already closing:", err);
+//         }
+//         ws.close();
+//     }
+
+//     if (processor) processor.disconnect();
+//     if (source) source.disconnect();
+//     if (audioContext) audioContext.close();
+//     if (stream) stream.getTracks().forEach(track => track.stop());
+
+//     startBtn.disabled = false;
+//     stopBtn.disabled = true;
+//     submitBtn.disabled = true;
+// }
+
+// // Submit answer manually
+// function submitAnswer() {
+//     if (!isRunning) return;
+//     if (ws && ws.readyState === WebSocket.OPEN) {
+//         try {
+//             ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
+//         } catch (err) {
+//             console.log("WebSocket closed, cannot submit:", err);
+//         }
+//     }
+//     resetSilenceTimer();
+// }
+
+
+// // Silence detection
+// function resetSilenceTimer() {
+//     clearTimeout(silenceTimeout);
+//     silenceTimeout = setTimeout(() => {
+//         if (isRunning) submitAnswer();
+//     }, 10000);
+// }
+
+// startBtn.addEventListener("click", async () => {
+//     startBtn.disabled = true;
+//     stopBtn.disabled = false;
+//     submitBtn.disabled = false;
+//     await startInterview();
+// });
+
+// stopBtn.addEventListener("click", stopInterview);
+// submitBtn.addEventListener("click", submitAnswer);
+
+
+
+
 let audioContext = null;
 let processor = null;
 let source = null;
@@ -430,162 +827,202 @@ const stopBtn = document.getElementById("stopBtn");
 const submitBtn = document.getElementById("submitBtn");
 
 // Enable start button after file selection
-resumeInput.addEventListener("change", () => {
-  startBtn.disabled = false;
-});
+resumeInput.addEventListener("change", () => startBtn.disabled = false);
 
 // Upload resume & create session
 async function uploadResume() {
-  const file = resumeInput.files[0];
-  if (!file) return null;
+    const file = resumeInput.files[0];
+    if (!file) return null;
 
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("job_description", "Python Developer");
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("job_description", "Python Developer");
 
-  const response = await fetch("http://localhost:8000/upload_resume", {
-    method: "POST",
-    body: formData
-  });
+    const response = await fetch("http://localhost:8000/upload_resume", {
+        method: "POST",
+        body: formData
+    });
 
-  if (response.ok) {
-    const data = await response.json();
-    return data.session_id;
-  } else {
-    alert("Resume upload failed!");
-    return null;
-  }
+    if (response.ok) {
+        const data = await response.json();
+        return data.session_id;
+    } else {
+        alert("Resume upload failed!");
+        return null;
+    }
+}
+
+// Play WAV audio from server
+function playAudioBytes(bytes) {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.decodeAudioData(bytes.slice(0), (buffer) => {
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+    });
+}
+
+// Reset silence timer
+function resetSilenceTimer() {
+    clearTimeout(silenceTimeout);
+    silenceTimeout = setTimeout(() => {
+        if (isRunning) submitAnswer();
+    }, 10000);
 }
 
 // Start interview
 async function startInterview() {
-  if (isRunning) return;
-  isRunning = true;
+    if (isRunning) return;
+    isRunning = true;
 
-  sessionId = await uploadResume();
-  if (!sessionId) { isRunning = false; return; }
+    sessionId = await uploadResume();
+    if (!sessionId) { isRunning = false; return; }
 
-  const transcriptDiv = document.getElementById("transcript");
-  const feedbackDiv = document.getElementById("feedback");
+    const transcriptDiv = document.getElementById("transcript");
+    const feedbackDiv = document.getElementById("feedback");
 
-  transcriptDiv.textContent = "";
-  feedbackDiv.textContent = "Feedback will appear here after the interview.";
+    transcriptDiv.textContent = "";
+    feedbackDiv.textContent = "Feedback will appear here after the interview.";
 
-  ws = new WebSocket(`ws://localhost:8000/ws/interview?session_id=${sessionId}`);
+    ws = new WebSocket(`ws://localhost:8000/ws/interview?session_id=${sessionId}`);
 
-  ws.onopen = () => console.log("WebSocket connected");
+    ws.onopen = () => console.log("WebSocket connected");
 
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+    ws.onmessage = (event) => {
+        if (!isRunning) return; // Stop processing after stop
 
-    if (data.type === "QUESTION") {
-      transcriptDiv.textContent += "\n\n Question: " + data.text + "\n";
-      transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
-      resetSilenceTimer();
-    }
+        if (typeof event.data === "string") {
+            const data = JSON.parse(event.data);
 
-    if (data.type === "FINAL_TRANSCRIPT") {
-      transcriptDiv.textContent += "\n" + data.text;
-      transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
-    }
+            switch (data.type) {
+                case "QUESTION":
+                    transcriptDiv.textContent += "\n\n Question: " + data.text + "\n";
+                    transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+                    resetSilenceTimer();
+                    break;
 
-    if (data.type === "END" && data.summary) {
-      const summaryDiv = document.createElement("div");
-      summaryDiv.style.background = "#f3f4f6";
-      summaryDiv.style.border = "1px solid #d1d5db";
-      summaryDiv.style.borderRadius = "8px";
-      summaryDiv.style.padding = "10px";
-      summaryDiv.style.marginTop = "15px";
+                case "FINAL_TRANSCRIPT":
+                    transcriptDiv.textContent += "\n" + data.text;
+                    transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+                    break;
 
-      let summaryText = `Final Interview Summary:\n\nAverage Score: ${data.summary.average_score}\nResult: ${data.summary.result}\n\n`;
+                case "END":
+                    displaySummary(data.summary, transcriptDiv);
+                    stopInterview(); // Ensure cleanup
+                    break;
 
-      data.summary.questions.forEach((q, i) => {
-        summaryText += `Q${i + 1}: ${q}\nAnswer: ${data.summary.answers[i]}\nScores → Correctness: ${data.summary.scores[i].correctness}, Depth: ${data.summary.scores[i].depth}, Clarity: ${data.summary.scores[i].clarity}, Final: ${data.summary.scores[i].final_score}\n\n`;
-      });
+                case "ERROR":
+                    alert(data.text);
+                    stopInterview();
+                    break;
+            }
+        } else if (event.data instanceof Blob) {
+            const reader = new FileReader();
+            reader.onload = function () {
+                const arrayBuffer = reader.result;
+                playAudioBytes(arrayBuffer);
+            };
+            reader.readAsArrayBuffer(event.data);
+        }
+    };
 
-      // LLM-generated feedback
-      if (data.summary.feedback) {
-        summaryText += `Feedback:\n${data.summary.feedback}\n`;
-      }
+    ws.onclose = () => {
+        console.log("WebSocket closed");
+        isRunning = false;
+    };
 
-      summaryDiv.textContent = summaryText;
-      transcriptDiv.appendChild(summaryDiv);
+    // Audio setup
+    audioContext = new AudioContext({ sampleRate: 16000 });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      submitBtn.disabled = true;
-      isRunning = false;
-    }
+    source = audioContext.createMediaStreamSource(stream);
+    processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-    if (data.type === "ERROR") {
-      alert(data.text);
-      isRunning = false;
-    }
-  };
+    processor.onaudioprocess = (e) => {
+        if (!isRunning) return;
+        const input = e.inputBuffer.getChannelData(0);
 
-  ws.onclose = () => { console.log("WebSocket closed"); isRunning = false; };
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            // Convert Float32Array to ArrayBuffer for sending
+            ws.send(input.buffer);
+        }
 
-  // Audio setup
-  audioContext = new AudioContext({ sampleRate: 16000 });
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        resetSilenceTimer();
+    };
 
-  source = audioContext.createMediaStreamSource(stream);
-  processor = audioContext.createScriptProcessor(4096, 1, 1);
+    source.connect(processor);
+    processor.connect(audioContext.destination);
 
-  processor.onaudioprocess = (e) => {
-    if (!isRunning) return;
-    const input = e.inputBuffer.getChannelData(0);
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(input.buffer);
-    resetSilenceTimer();
-  };
-
-  source.connect(processor);
-  processor.connect(audioContext.destination);
-
-  stopBtn.disabled = false;
-  submitBtn.disabled = false;
+    stopBtn.disabled = false;
+    submitBtn.disabled = false;
 }
 
-// Stop interview
+// Stop interview safely
 function stopInterview() {
-  if (!isRunning) return;
-  isRunning = false;
+    if (!isRunning) return;
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
-    ws.close();
-  }
+    isRunning = false;
 
-  if (processor) processor.disconnect();
-  if (source) source.disconnect();
-  if (audioContext) audioContext.close();
-  if (stream) stream.getTracks().forEach(track => track.stop());
+    // Stop audio capture
+    if (processor) processor.disconnect();
+    if (source) source.disconnect();
+    if (audioContext) audioContext.close();
+    if (stream) stream.getTracks().forEach(track => track.stop());
 
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  submitBtn.disabled = true;
+    // Close WebSocket safely
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+            ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
+            ws.close();
+        } catch (e) {
+            console.log("WebSocket already closing/closed");
+        }
+    }
+
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    submitBtn.disabled = true;
 }
 
 // Submit answer manually
 function submitAnswer() {
-  if (!isRunning) return;
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
-  resetSilenceTimer();
+    if (!isRunning) return;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
+    resetSilenceTimer();
 }
 
-// Silence detection
-function resetSilenceTimer() {
-  clearTimeout(silenceTimeout);
-  silenceTimeout = setTimeout(() => {
-    if (isRunning) submitAnswer();
-  }, 10000);
+// Display interview summary
+function displaySummary(summary, container) {
+    if (!summary) return;
+
+    const summaryDiv = document.createElement("div");
+    summaryDiv.style.background = "#f3f4f6";
+    summaryDiv.style.border = "1px solid #d1d5db";
+    summaryDiv.style.borderRadius = "8px";
+    summaryDiv.style.padding = "10px";
+    summaryDiv.style.marginTop = "15px";
+
+    let summaryText = `Final Interview Summary:\n\nAverage Score: ${summary.average_score}\nResult: ${summary.result}\n\n`;
+
+    summary.questions.forEach((q, i) => {
+        summaryText += `Q${i + 1}: ${q}\nAnswer: ${summary.answers[i]}\nScores → Correctness: ${summary.scores[i].correctness}, Depth: ${summary.scores[i].depth}, Clarity: ${summary.scores[i].clarity}, Final: ${summary.scores[i].final_score}\n\n`;
+    });
+
+    if (summary.feedback) {
+        summaryText += `Feedback:\n${summary.feedback}\n`;
+    }
+
+    summaryDiv.textContent = summaryText;
+    container.appendChild(summaryDiv);
 }
 
+// Button event listeners
 startBtn.addEventListener("click", async () => {
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-  submitBtn.disabled = false;
-  await startInterview();
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    submitBtn.disabled = false;
+    await startInterview();
 });
 
 stopBtn.addEventListener("click", stopInterview);
