@@ -11,6 +11,8 @@
 #     return " ".join(segment.text for segment in segments).strip()
 
 
+
+# backend/app/services/stt.py
 import numpy as np
 from faster_whisper import WhisperModel
 
