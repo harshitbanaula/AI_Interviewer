@@ -23,6 +23,8 @@ huggingface-hub
 sentence-transformers
 pypdf
 python-docx
+docx2txt
+
 langchain-groq
 
 # for speech to text
