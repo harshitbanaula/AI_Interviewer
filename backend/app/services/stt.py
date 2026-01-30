@@ -23,11 +23,11 @@ model = WhisperModel(
     compute_type="int8"
 )
 
+
+# Transcribes a short audio chunk (~1–2 seconds) Returns partial transcript
+
 def transcribe_chunk(audio_buffer: bytes, sample_rate: int = 16000) -> str:
-    """
-    Transcribes a short audio chunk (~1–2 seconds)
-    Returns partial transcript
-    """
+    
 
     if not audio_buffer:
         return ""

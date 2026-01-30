@@ -57,12 +57,7 @@ def parse_resume(filename: str, content_bytes: bytes) -> str:
 # ----------------------------
 
 def clean_resume_text(text: str) -> str:
-    """
-    Cleans resume text:
-    - Removes junk headers/footers
-    - Normalizes whitespace
-    - Fixes broken lines
-    """
+
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'Page\s*\d+\s*(of\s*\d+)?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'^\s*\d+\s*$', '', text, flags=re.MULTILINE)
@@ -73,9 +68,7 @@ def clean_resume_text(text: str) -> str:
 
 
 def extract_projects_section(resume_text: str) -> str:
-    """
-    Extracts the PROJECT EXPERIENCE section and ensures each project starts on a new line.
-    """
+
     # match = re.search(r'PROJECT EXPERIENCE(.*?)(EDUCATION|CERTIFICATIONS|$)', resume_text, re.DOTALL | re.IGNORECASE)
     match = re.search(
     r'(PROJECTS?|PROJECT\s+EXPERIENCE|ACADEMIC\s+PROJECTS?|PERSONAL\s+PROJECTS?|KEY\s+PROJECTS?|MAJOR\s+PROJECTS?)'
@@ -126,9 +119,7 @@ def parse_projects(resume_text: str) -> List[Dict[str, str]]:
 
 
 def get_resume_summary(resume_text: str) -> Dict[str, any]:
-    """
-    Generate structured resume summary including projects.
-    """
+
     projects = parse_projects(resume_text)
     technologies = extract_technologies_from_resume(resume_text)
 
@@ -143,9 +134,7 @@ def get_resume_summary(resume_text: str) -> Dict[str, any]:
 
 
 def extract_technologies_from_resume(resume_text: str) -> List[str]:
-    """
-    Extract technologies/skills mentioned in resume.
-    """
+
     tech_patterns = [
         r'\bPython\b', r'\bJava\b', r'\bJavaScript\b', r'\bTypeScript\b',
         r'\bReact\b', r'\bAngular\b', r'\bVue\b',
@@ -164,20 +153,20 @@ def extract_technologies_from_resume(resume_text: str) -> List[str]:
     return list(technologies)
 
 
-# ----------------------------
-# Example Usage
-# ----------------------------
-if __name__ == "__main__":
-    with open("resume.txt", "rb") as f:
-        content = f.read()
+# # ----------------------------
+# # Example Usage
+# # ----------------------------
+# if __name__ == "__main__":
+#     with open("resume.txt", "rb") as f:
+#         content = f.read()
 
-    text = parse_resume("resume.txt", content)
-    summary = get_resume_summary(text)
+#     text = parse_resume("resume.txt", content)
+#     summary = get_resume_summary(text)
 
-    print("Number of Projects:", summary["num_projects"])
-    for i, proj in enumerate(summary["projects"], 1):
-        print(f"\nProject {i}: {proj['name']}")
-        print(proj["description"])
+#     print("Number of Projects:", summary["num_projects"])
+#     for i, proj in enumerate(summary["projects"], 1):
+#         print(f"\nProject {i}: {proj['name']}")
+#         print(proj["description"])
 
 
 

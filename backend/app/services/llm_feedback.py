@@ -60,9 +60,6 @@ feedback_chain = feedback_prompt | llm | StrOutputParser()
 
 
 def generate_feedback(qa_list: list, average_score: float) -> str:
-    """
-    Generate LLM-based interview feedback.
-    """
 
     qa_text = ""
     for idx, qa in enumerate(qa_list, 1):

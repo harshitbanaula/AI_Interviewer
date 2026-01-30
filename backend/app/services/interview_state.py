@@ -375,9 +375,7 @@ class InterviewSession:
         return question.strip() in self.questions
 
     def _generate_unique_question(self, stage: str) -> str:
-        """
-        Regenerate until question is unique or fallback.
-        """
+        
         for _ in range(self.MAX_RETRY):
             q = generate_question(
                 job_description=self.job_description,

@@ -75,10 +75,6 @@ WEIGHTS = {
 }
 
 def score_answer(answer_text: str) -> dict:
-    """
-    Backend-controlled scoring.
-    LLM is advisory for feedback only.
-    """
 
     words = len(answer_text.split())
 
