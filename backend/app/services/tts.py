@@ -80,7 +80,8 @@ def synthesize_speech(text: str, speaker_id: int = 0, speed: float = 1.0) -> Opt
 
     try:
         # Tokenize input text
-        inputs = tokenizer(text, return_tensors="pt").to(DEVICE)
+        # inputs = tokenizer(text, return_tensors="pt").to(DEVICE)
+        inputs = tokenizer(text,return_tensors="pt",padding=True,truncation=True).to(DEVICE)
 
         with torch.no_grad():
             output = model(**inputs, speaker_id=speaker_id).waveform[0]  # [num_samples]
