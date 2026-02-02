@@ -152,7 +152,7 @@ def synthesize_speech(text: str, speaker_id: int = 0, speed: float = 1.0) -> Opt
             return_tensors="pt",
             padding="max_length",
             truncation=True,
-            max_length=512,
+            max_length=1000,
             add_special_tokens=False  # KEY FIX: Prevents tensor creation error
         )
         

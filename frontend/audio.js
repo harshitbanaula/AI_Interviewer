@@ -632,7 +632,7 @@ function resetSilenceTimer() {
     clearTimeout(silenceTimeout);
     silenceTimeout = setTimeout(() => {
         if (isRunning && !isAISpeaking) {
-            console.log("⏰ Silence timeout - auto-submitting answer");
+            console.log(" Silence timeout - auto-submitting answer");
             submitAnswer();
         }
     }, 10000); // 10 seconds of silence
