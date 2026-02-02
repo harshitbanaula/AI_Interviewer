@@ -476,9 +476,10 @@
 // stopBtn.addEventListener("click", stopInterview);
 // submitBtn.addEventListener("click", submitAnswer);
 
+// fronted/audio.js
 
 
-
+// frontend/audio.js
 
 let audioContext = null;
 let processor = null;
@@ -486,7 +487,7 @@ let source = null;
 let stream = null;
 let isRunning = false;
 let sessionId = null;
-let silenceTimeout;
+let silenceTimeout = null;
 let ws;
 
 // Mic + TTS state
@@ -500,21 +501,13 @@ const stopBtn = document.getElementById("stopBtn");
 const submitBtn = document.getElementById("submitBtn");
 
 // Enable start button after file selection
-resumeInput.addEventListener("change", () => {
-    startBtn.disabled = false;
-    console.log(" Resume file selected");
-});
+resumeInput.addEventListener("change", () => startBtn.disabled = false);
 
 // Upload resume & create session
 async function uploadResume() {
     const file = resumeInput.files[0];
-    if (!file) {
-        console.error(" No file selected");
-        return null;
-    }
+    if (!file) return null;
 
-    console.log(` Uploading resume: ${file.name}`);
-    
     const formData = new FormData();
     formData.append("file", file);
     formData.append("job_description", "Python Developer");
@@ -524,336 +517,178 @@ async function uploadResume() {
             method: "POST",
             body: formData
         });
-
-        if (response.ok) {
-            const data = await response.json();
-            console.log(`Session created: ${data.session_id}`);
-            return data.session_id;
-        } else {
-            const errorText = await response.text();
-            console.error(" Resume upload failed:", errorText);
-            alert("Resume upload failed! Check console for details.");
-            return null;
-        }
-    } catch (error) {
-        console.error(" Upload error:", error);
-        alert("Network error during upload!");
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        return data.session_id;
+    } catch (err) {
+        console.error("Resume upload failed:", err);
+        alert("Resume upload failed! Check console for details.");
         return null;
     }
 }
 
-// Play WAV audio from server - FIXED VERSION
-async function playAudioBytes(arrayBuffer) {
-    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-        console.warn(" Empty audio buffer received");
-        return;
+// Convert Float32Array to 16-bit PCM
+function floatTo16BitPCM(float32Array) {
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    for (let i = 0; i < float32Array.length; i++) {
+        let s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
-    
-    if (!audioContext) {
-        console.error(" AudioContext not initialized");
-        return;
-    }
+    return buffer;
+}
 
-    console.log(`🔊 Playing audio (${arrayBuffer.byteLength} bytes)...`);
-    
+// Play WAV audio from server
+async function playAudioBytes(arrayBuffer) {
+    if (!arrayBuffer || arrayBuffer.byteLength === 0 || !audioContext) return;
+
     isAISpeaking = true;
     micEnabled = false;
     muteMic();
     submitBtn.disabled = true;
 
     try {
-        // Decode the entire WAV audio buffer
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        console.log(`   Duration: ${audioBuffer.duration.toFixed(2)}s, Sample rate: ${audioBuffer.sampleRate}Hz`);
-        
-        // Create and configure audio source
         const sourceNode = audioContext.createBufferSource();
         sourceNode.buffer = audioBuffer;
         sourceNode.connect(audioContext.destination);
-        
-        // Wait for playback to complete
+
         await new Promise((resolve, reject) => {
-            sourceNode.onended = () => {
-                console.log(" Audio playback finished");
-                resolve();
-            };
-            
-            sourceNode.onerror = (error) => {
-                console.error(" Audio playback error:", error);
-                reject(error);
-            };
-            
+            sourceNode.onended = resolve;
+            sourceNode.onerror = reject;
             sourceNode.start(0);
         });
-
-    } catch (error) {
-        console.error(" Audio decode/playback error:", error);
-        alert("Audio playback failed! Check console for details.");
+    } catch (err) {
+        console.error("Audio playback failed:", err);
     } finally {
-        // Re-enable mic after playback
         isAISpeaking = false;
         micEnabled = true;
         unmuteMic();
         submitBtn.disabled = false;
-        console.log("Mic re-enabled");
     }
 }
 
-// Mic control - FIXED
-function muteMic() {
-    if (processor && source) {
-        try {
-            processor.disconnect();
-            source.disconnect();
-            console.log(" Mic muted");
-        } catch (e) {
-            console.log(" Mic already disconnected");
-        }
-    }
-    micEnabled = false;
-}
-
-function unmuteMic() {
-    if (source && processor && audioContext && isRunning) {
-        try {
-            source.connect(processor);
-            processor.connect(audioContext.destination);
-            console.log(" Mic unmuted");
-        } catch (e) {
-            console.error(" Could not reconnect mic:", e);
-        }
-    }
-    micEnabled = true;
-}
+// Mic control
+function muteMic() { if (processor && source) { try { processor.disconnect(); source.disconnect(); } catch{} } micEnabled = false; }
+function unmuteMic() { if (processor && source && audioContext && isRunning) { try { source.connect(processor); processor.connect(audioContext.destination); } catch{} } micEnabled = true; }
 
 // Reset silence timer
 function resetSilenceTimer() {
     clearTimeout(silenceTimeout);
     silenceTimeout = setTimeout(() => {
-        if (isRunning && !isAISpeaking) {
-            console.log(" Silence timeout - auto-submitting answer");
-            submitAnswer();
-        }
-    }, 10000); // 10 seconds of silence
+        if (isRunning && !isAISpeaking) submitAnswer();
+    }, 10000); // 10s
 }
 
 // Start interview
 async function startInterview() {
-    if (isRunning) {
-        console.warn(" Interview already running");
-        return;
-    }
-    
-    console.log(" Starting interview...");
+    if (isRunning) return;
     isRunning = true;
 
-    // Upload resume and get session ID
     sessionId = await uploadResume();
-    if (!sessionId) {
-        console.error(" Failed to get session ID");
-        isRunning = false;
-        return;
-    }
+    if (!sessionId) { isRunning = false; return; }
 
     const transcriptDiv = document.getElementById("transcript");
     const feedbackDiv = document.getElementById("feedback");
-
     transcriptDiv.textContent = "Interview starting...\n";
     feedbackDiv.textContent = "Feedback will appear here after the interview.";
 
-    // Create WebSocket connection
-    const wsUrl = `ws://localhost:8000/ws/interview?session_id=${sessionId}`;
-    console.log(`🔌 Connecting to: ${wsUrl}`);
-    
-    ws = new WebSocket(wsUrl);
+    ws = new WebSocket(`ws://localhost:8000/ws/interview?session_id=${sessionId}`);
+    ws.binaryType = "arraybuffer";
 
-    ws.onopen = () => {
-        console.log("✓ WebSocket connected");
-        transcriptDiv.textContent += "✓ Connected to server\n";
-    };
+    ws.onopen = () => console.log("WebSocket connected");
 
     ws.onmessage = async (event) => {
         if (!isRunning) return;
 
-        // Handle JSON messages
         if (typeof event.data === "string") {
-            try {
-                const data = JSON.parse(event.data);
-                console.log(" Received message:", data.type);
+            const data = JSON.parse(event.data);
+            switch (data.type) {
+                case "QUESTION":
+                    transcriptDiv.textContent += `\n❓ ${data.text}\n`;
+                    transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+                    resetSilenceTimer();
+                    break;
 
-                switch (data.type) {
-                    case "QUESTION":
-                        transcriptDiv.textContent += `\n\n❓ Question: ${data.text}\n`;
-                        transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
-                        resetSilenceTimer();
-                        break;
+                case "FINAL_TRANSCRIPT":
+                    transcriptDiv.textContent += `\nYou: ${data.text}\n`;
+                    transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+                    break;
 
-                    case "FINAL_TRANSCRIPT":
-                        transcriptDiv.textContent += `\n You: ${data.text}`;
-                        transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
-                        break;
+                case "END":
+                    await displaySummary(data.summary, transcriptDiv);
+                    console.log("Interview finished. Closing WebSocket...");
+                    if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+                    stopInterview(false);
+                    break;
 
-                    case "END":
-                        console.log("🏁 Interview ended");
-                        displaySummary(data.summary, transcriptDiv);
-                        stopInterview();
-                        break;
-
-                    case "ERROR":
-                        console.error(" Server error:", data.text);
-                        alert(`Error: ${data.text}`);
-                        stopInterview();
-                        break;
-                    
-                    default:
-                        console.warn(" Unknown message type:", data.type);
-                }
-            } catch (error) {
-                console.error(" Failed to parse JSON message:", error);
+                case "ERROR":
+                    alert(`Error: ${data.text}`);
+                    stopInterview();
+                    break;
             }
-        }
-        // Handle binary audio data (Blob)
-        else if (event.data instanceof Blob) {
-            console.log(`🎵 Received audio blob (${event.data.size} bytes)`);
-            try {
-                const arrayBuffer = await event.data.arrayBuffer();
-                await playAudioBytes(arrayBuffer);
-            } catch (error) {
-                console.error(" Failed to process audio blob:", error);
-            }
+        } else if (event.data instanceof ArrayBuffer) {
+            await playAudioBytes(event.data);
         }
     };
 
-    ws.onerror = (error) => {
-        console.error(" WebSocket error:", error);
-        alert("WebSocket connection error! Check if server is running.");
-    };
+    ws.onerror = (err) => console.error("WebSocket error:", err);
+    ws.onclose = () => { console.log("WebSocket closed"); isRunning = false; };
 
-    ws.onclose = (event) => {
-        console.log(`🔌 WebSocket closed (code: ${event.code}, reason: ${event.reason})`);
-        isRunning = false;
-    };
-
-    // Initialize audio context and microphone
+    // Initialize audio
     try {
-        console.log(" Initializing audio...");
         audioContext = new AudioContext({ sampleRate: 16000 });
-        stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                sampleRate: 16000
-            }
-        });
-
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } });
         source = audioContext.createMediaStreamSource(stream);
         processor = audioContext.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
             if (!isRunning || !micEnabled || isAISpeaking) return;
-
             const input = e.inputBuffer.getChannelData(0);
-            
-            // Send audio data to server
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(input.buffer);
+                ws.send(floatTo16BitPCM(input));
             }
-
             resetSilenceTimer();
         };
 
-        // Connect mic initially
         unmuteMic();
-        
-        console.log("Audio initialized");
         stopBtn.disabled = false;
         submitBtn.disabled = false;
-        
-    } catch (error) {
-        console.error(" Failed to initialize audio:", error);
-        alert("Microphone access denied or not available!");
+
+    } catch (err) {
+        console.error("Audio initialization failed:", err);
+        alert("Microphone access denied or unavailable");
         stopInterview();
     }
 }
 
 // Stop interview safely
-function stopInterview() {
-    if (!isRunning) return;
-
-    console.log(" Stopping interview...");
+function stopInterview(resetButtons = true) {
     isRunning = false;
     clearTimeout(silenceTimeout);
 
-    // Disconnect audio processor
-    if (processor) {
-        try {
-            processor.disconnect();
-        } catch (e) {}
-        processor = null;
-    }
-    
-    // Disconnect audio source
-    if (source) {
-        try {
-            source.disconnect();
-        } catch (e) {}
-        source = null;
-    }
-    
-    // Close audio context
-    if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-    }
-    
-    // Stop media stream
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        stream = null;
-    }
+    if (processor) { try { processor.disconnect(); } catch{} processor = null; }
+    if (source) { try { source.disconnect(); } catch{} source = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
 
-    // Close WebSocket
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-            ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
-            ws.close();
-        } catch (e) {
-            console.log(" WebSocket already closing/closed");
-        }
+    if (resetButtons) {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        submitBtn.disabled = true;
     }
-
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    submitBtn.disabled = true;
-    
-    console.log(" Interview stopped");
 }
 
 // Submit answer manually
 function submitAnswer() {
-    if (!isRunning || isAISpeaking) {
-        console.warn(" Cannot submit: interview not running or AI is speaking");
-        return;
-    }
-    
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        console.log("📤 Submitting answer...");
-        ws.send(JSON.stringify({ text: "SUBMIT_ANSWER" }));
-        resetSilenceTimer();
-    } else {
-        console.error("WebSocket not open");
-    }
+    if (!isRunning || isAISpeaking) return;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
+    resetSilenceTimer();
 }
 
-// Display interview summary
-function displaySummary(summary, container) {
-    if (!summary) {
-        console.warn(" No summary data received");
-        return;
-    }
-
-    console.log(" Displaying interview summary");
+// Display summary
+async function displaySummary(summary, container) {
+    if (!summary) return;
 
     const summaryDiv = document.createElement("div");
     summaryDiv.style.background = "#f3f4f6";
@@ -864,57 +699,30 @@ function displaySummary(summary, container) {
     summaryDiv.style.fontFamily = "monospace";
     summaryDiv.style.whiteSpace = "pre-wrap";
 
-    let summaryText = `\n${"=".repeat(60)}\n`;
-    summaryText += ` FINAL INTERVIEW SUMMARY\n`;
-    summaryText += `${"=".repeat(60)}\n\n`;
-    summaryText += `Average Score: ${summary.average_score}/10\n`;
-    summaryText += `Result: ${summary.result}\n\n`;
+    let text = `\n${"=".repeat(60)}\nFINAL INTERVIEW SUMMARY\n${"=".repeat(60)}\n\n`;
+    text += `Average Score: ${summary.average_score}\nResult: ${summary.result}\n\n`;
 
-    if (summary.questions && summary.questions.length > 0) {
-        summary.questions.forEach((q, i) => {
-            summaryText += `${"-".repeat(60)}\n`;
-            summaryText += `Q${i + 1}: ${q}\n\n`;
-            summaryText += `Your Answer:\n${summary.answers[i]}\n\n`;
-            
-            if (summary.scores && summary.scores[i]) {
-                const scores = summary.scores[i];
-                summaryText += `Scores:\n`;
-                summaryText += `  • Correctness: ${scores.correctness}/10\n`;
-                summaryText += `  • Depth: ${scores.depth}/10\n`;
-                summaryText += `  • Clarity: ${scores.clarity}/10\n`;
-                summaryText += `  • Final Score: ${scores.final_score}/10\n\n`;
-            }
-        });
-    }
+    summary.questions.forEach((q, i) => {
+        const ans = summary.answers[i] || "No answer provided";
+        const scores = summary.scores[i] || {};
+        text += `${"-".repeat(60)}\nQ${i+1}: ${q}\nYour Answer: ${ans}\nScores:\n`;
+        text += `  • Correctness: ${scores.semantic_correctness ?? 0}\n`;
+        text += `  • Depth: ${scores.reasoning_quality ?? 0}\n`;
+        text += `  • Clarity: ${scores.clarity ?? 0}\n`;
+        text += `  • Final: ${scores.final_score ?? 0}\n\n`;
+    });
 
-    if (summary.feedback) {
-        summaryText += `${"-".repeat(60)}\n`;
-        summaryText += `Overall Feedback:\n${summary.feedback}\n`;
-    }
+    if (summary.feedback) text += `Overall Feedback:\n${summary.feedback}\n`;
+    text += `${"=".repeat(60)}\n`;
 
-    summaryText += `${"=".repeat(60)}\n`;
-
-    summaryDiv.textContent = summaryText;
+    summaryDiv.textContent = text;
     container.appendChild(summaryDiv);
     container.scrollTop = container.scrollHeight;
 }
 
-// Button event listeners
-startBtn.addEventListener("click", async () => {
-    console.log("Start button clicked");
-    startBtn.disabled = true;
-    await startInterview();
-});
+// Button events
+startBtn.addEventListener("click", async () => { startBtn.disabled = true; await startInterview(); });
+stopBtn.addEventListener("click", stopInterview);
+submitBtn.addEventListener("click", submitAnswer);
 
-stopBtn.addEventListener("click", () => {
-    console.log("Stop button clicked");
-    stopInterview();
-});
-
-submitBtn.addEventListener("click", () => {
-    console.log("Submit button clicked");
-    submitAnswer();
-});
-
-// Log initial state
-console.log("✓ Audio.js loaded successfully");
+console.log("Audio.js loaded successfully");
