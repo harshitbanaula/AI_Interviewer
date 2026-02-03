@@ -333,6 +333,7 @@
 #             pass
 
 
+# backend/app/routers/ws.py
 
 from fastapi import APIRouter, WebSocket, Query
 from app.services.stt import transcribe_chunk

@@ -102,7 +102,7 @@
 
 
 
-
+# backend/app/services/tts.py
 
 import torch
 from transformers import VitsModel, AutoTokenizer
@@ -111,6 +111,10 @@ import scipy.io.wavfile
 from typing import Optional
 import numpy as np
 from scipy.signal import resample
+
+
+
+# Local setup for Kakao VITS TTS model
 
 # Load model once when the service starts
 MODEL_NAME = "kakao-enterprise/vits-vctk"
