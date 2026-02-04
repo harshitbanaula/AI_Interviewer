@@ -208,28 +208,18 @@
 #     return _sessions.get(session_id)
 
 
-
-
 # backend/app/services/interview_state.py
 import uuid
-import re
 from typing import Dict, List, Optional
 
 from app.services.question_generator import generate_question
 from app.services.evaluator import score_answer, set_current_question
 from app.services.llm_feedback import generate_feedback
 
-class InterviewSession:
-    HR_QUESTIONS = [
-        "Can you describe a situation where you faced a challenge and how you handled it?",
-        "How do you prioritize tasks when working on multiple projects?",
-        "Tell me about a time you worked in a team and faced conflict.",
-        "Describe a time you had to learn a new technology quickly.",
-        "What motivates you in your professional career?"
-    ]
 
-    MAX_TECH_QUESTIONS = 5
-    MAX_DEEP_DIVE_QUESTIONS = 2
+class InterviewSession:
+
+    MAX_TECH_QUESTIONS = 10
     MAX_RETRY = 5
 
     def __init__(self, resume_text: str, job_description: str):
@@ -244,22 +234,48 @@ class InterviewSession:
         self.answers: List[str] = []
         self.scores: List[dict] = []
 
-        self.tech_count = 0
-        self.deep_dive_count = 0
-        self.hr_index = 0
         self.covered_projects: List[str] = []
+
+        # Adaptive Intelligence State(Decision based flow)
+        self.current_topic: Optional[str] = None
+        self.topic_weakness: Dict[str, int] = {}
 
         self.feedback_text: str = ""
 
-    # ----------------------------
-    # Helpers
-    # ----------------------------
-    def _extract_project_from_question(self, question: str) -> Optional[str]:
-        match = re.search(r'for the ([A-Za-z0-9 _\-]+) project', question, re.IGNORECASE)
-        return match.group(1).strip() if match else None
-
+    # Helper Functions
     def _is_duplicate(self, question: str) -> bool:
         return question.strip() in self.questions
+
+    def _detect_topic(self, question: str) -> Optional[str]:
+        for project in self.covered_projects:
+            if project.lower() in question.lower():
+                return project
+        return None
+
+    def _classify_answer(self, score: float) -> str:
+        if score >= 0.75:
+            return "STRONG"
+        elif score >= 0.40:
+            return "CONFUSED"
+        return "WEAK"
+
+    def _decide_next_stage(self, topic: Optional[str], classification: str) -> str:
+        if not topic:
+            return "TECH_SWITCH"
+
+        if classification == "STRONG":
+            self.topic_weakness[topic] = 0
+            return "TECH_DEEPEN"
+
+        if classification == "CONFUSED":
+            return "TECH_CLARIFY"
+
+        self.topic_weakness[topic] = self.topic_weakness.get(topic, 0) + 1
+
+        if self.topic_weakness[topic] >= 2:
+            return "TECH_SWITCH"
+
+        return "TECH_SIMPLIFY"
 
     def _generate_unique_question(self, stage: str) -> str:
         for _ in range(self.MAX_RETRY):
@@ -271,70 +287,40 @@ class InterviewSession:
                 covered_projects=self.covered_projects,
                 previous_questions=self.questions
             )
-            if isinstance(result, dict):
-                q = result.get("question", "").strip()
-                self.covered_projects = result.get("covered_projects", self.covered_projects)
-            else:
-                q = str(result).strip()
+
+            q = result.get("question", "").strip()
+            self.covered_projects = result.get("covered_projects", self.covered_projects)
 
             if q and not self._is_duplicate(q):
                 return q
 
-        return "Can you explain a technical decision you made recently and why?"
+        return "Let’s talk about a technical decision you made recently."
 
-    # ----------------------------
-    # Interview Flow
-    # ----------------------------
+    # Interview Flow:
     def next_question(self) -> Optional[str]:
         if self.completed:
             return None
 
-        self.expecting_answer = True
-
-        # INTRO
-        if self.stage == "INTRO":
-            self.stage = "TECHNICAL"
-            q = "Please briefly introduce yourself and your professional background."
-
-        # TECHNICAL
-        elif self.stage == "TECHNICAL" and self.tech_count < self.MAX_TECH_QUESTIONS:
-            self.tech_count += 1
-            q = self._generate_unique_question("TECHNICAL")
-        elif self.stage == "TECHNICAL":
-            self.stage = "DEEP_DIVE"
-            return self.next_question()
-
-        # DEEP_DIVE
-        elif self.stage == "DEEP_DIVE" and self.deep_dive_count < self.MAX_DEEP_DIVE_QUESTIONS:
-            self.deep_dive_count += 1
-            q = self._generate_unique_question("DEEP_DIVE")
-        elif self.stage == "DEEP_DIVE":
-            self.stage = "HR"
-            return self.next_question()
-
-        # HR
-        elif self.stage == "HR" and self.hr_index < len(self.HR_QUESTIONS):
-            q = self.HR_QUESTIONS[self.hr_index]
-            self.hr_index += 1
-        else:
+        # Stop condition (intro + tech questions)
+        if len(self.questions) >= self.MAX_TECH_QUESTIONS + 1:
             self.completed = True
-            self.expecting_answer = False
             self.generate_feedback()
             return None
 
-        # Track question
-        self.questions.append(q)
+        self.expecting_answer = True
+        # Intro 
+        if self.stage == "INTRO":
+            self.stage = "TECH_SWITCH"
+            q = "Please briefly introduce yourself and your professional background."
+        else:
+            q = self._generate_unique_question(self.stage)
 
-        # Track project
-        project = self._extract_project_from_question(q)
-        if project and project not in self.covered_projects:
-            self.covered_projects.append(project)
+        self.questions.append(q)
+        self.current_topic = self._detect_topic(q)
 
         return q
 
-    # ----------------------------
     # Answer Handling
-    # ----------------------------
     def save_answer(self, answer: str):
         if not self.expecting_answer or not self.questions:
             return
@@ -342,15 +328,18 @@ class InterviewSession:
         answer_text = answer.strip() or "No answer provided"
         question = self.questions[-1]
 
-        set_current_question(question)  # safe question context
+        set_current_question(question)
+        score = score_answer(answer_text, question)
+
         self.answers.append(answer_text)
-        self.scores.append(score_answer(answer_text, question))
+        self.scores.append(score)
+
+        classification = self._classify_answer(score["final_score"])
+        self.stage = self._decide_next_stage(self.current_topic, classification)
 
         self.expecting_answer = False
 
-    # ----------------------------
     # Feedback
-    # ----------------------------
     def generate_feedback(self):
         qa_list = []
         for i, q in enumerate(self.questions):
@@ -369,9 +358,9 @@ class InterviewSession:
 
         self.feedback_text = generate_feedback(qa_list, avg_score)
 
-    # ----------------------------
+
     # Final Result
-    # ----------------------------
+
     def final_result(self) -> dict:
         avg_score = round(
             sum(s["final_score"] for s in self.scores) / len(self.scores),
@@ -388,9 +377,9 @@ class InterviewSession:
             "covered_projects": self.covered_projects
         }
 
-# ----------------------------
+
 # Session Store
-# ----------------------------
+
 _sessions: Dict[str, InterviewSession] = {}
 
 def create_session(resume_text: str, job_description: str) -> str:
