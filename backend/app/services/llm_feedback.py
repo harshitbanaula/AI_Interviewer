@@ -28,7 +28,7 @@ llm = ChatGroq(
     api_key=GROQ_API_KEY,
     model=GROQ_MODEL_ID,
     temperature=0.1,
-    max_tokens=250,
+    max_tokens=700,
 )
 
 feedback_prompt = ChatPromptTemplate.from_messages([
