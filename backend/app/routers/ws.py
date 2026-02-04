@@ -401,15 +401,20 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                     })
 
                     next_q = session.next_question()
-                    if next_q:
-                        await send_question(next_q)
-                    else:
+
+                    # Interview finished
+                    if session.completed:
                         summary = session.final_result()
                         await ws.send_json({
                             "type": "END",
                             "summary": summary
                         })
                         break
+
+                    # Continue interview
+                    if next_q:
+                        await send_question(next_q)
+
 
     except Exception as e:
         print("WebSocket error:", e)
