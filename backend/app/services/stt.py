@@ -1,16 +1,3 @@
-# from faster_whisper import WhisperModel
-
-# model = WhisperModel(
-#     "medium",
-#     device="cpu",
-#     compute_type="int8"
-# )
-
-# def speech_to_text(wav_path: str) -> str:
-#     segments, _ = model.transcribe(wav_path)
-#     return " ".join(segment.text for segment in segments).strip()
-
-
 
 # backend/app/services/stt.py
 import numpy as np
@@ -50,3 +37,4 @@ def transcribe_chunk(audio_buffer: bytes, sample_rate: int = 16000) -> str:
         text += segment.text.strip() + " "
 
     return text.strip()
+

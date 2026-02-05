@@ -335,11 +335,12 @@
 
 # backend/app/routers/ws.py
 
+import time
+import json
 from fastapi import APIRouter, WebSocket, Query
 from app.services.stt import transcribe_chunk
 from app.services.interview_state import get_session
 from app.services.tts import synthesize_speech
-import json
 
 router = APIRouter()
 
@@ -347,6 +348,7 @@ router = APIRouter()
 @router.websocket("/ws/interview")
 async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
     await ws.accept()
+
     session = get_session(session_id)
 
     if not session:
@@ -354,17 +356,33 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         await ws.close()
         return
 
+    session.session_start_time = time.time()
+
+    await ws.send_json({
+        "type": "TIMER_INIT",
+        "total_seconds": session.SESSION_LIMIT_SECONDS
+    })
+
     audio_buffer = bytearray()
 
     async def send_question(q: str):
+        elapsed = int(time.time() - session.session_start_time)
+        remaining = max(session.SESSION_LIMIT_SECONDS - elapsed, 0)
+
+        await ws.send_json({
+            "type": "TIMER_UPDATE",
+            "remaining_seconds": remaining
+        })
+
         await ws.send_json({"type": "QUESTION", "text": q})
+
         audio = synthesize_speech(q, speaker_id=0, speed=0.85)
         if audio:
             await ws.send_json({"type": "TTS_START"})
             await ws.send_bytes(audio)
             await ws.send_json({"type": "TTS_END"})
 
-    # Send first question
+    # First question
     first_q = session.next_question()
     if first_q:
         await send_question(first_q)
@@ -373,19 +391,15 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         while True:
             msg = await ws.receive()
 
-            # 1 AUDIO CHUNKS (binary frames)
+            # AUDIO
             if msg.get("bytes") and session.expecting_answer:
                 audio_buffer.extend(msg["bytes"])
                 continue
 
-            # 2 TEXT / JSON messages
+            # TEXT
             if msg.get("text"):
-                try:
-                    payload = json.loads(msg["text"])
-                except json.JSONDecodeError:
-                    continue
+                payload = json.loads(msg["text"])
 
-                # Submit answer
                 if payload.get("action") == "SUBMIT_ANSWER":
                     if audio_buffer:
                         answer_text = transcribe_chunk(bytes(audio_buffer))
@@ -401,9 +415,9 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                     })
 
                     next_q = session.next_question()
-
-                    # Interview finished
-                    if session.completed:
+                    if next_q:
+                        await send_question(next_q)
+                    else:
                         summary = session.final_result()
                         await ws.send_json({
                             "type": "END",
@@ -411,14 +425,6 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                         })
                         break
 
-                    # Continue interview
-                    if next_q:
-                        await send_question(next_q)
-
-
     except Exception as e:
         print("WebSocket error:", e)
-        try:
-            await ws.close()
-        except Exception:
-            pass
+        await ws.close()

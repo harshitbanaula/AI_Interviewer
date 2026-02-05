@@ -476,34 +476,60 @@
 // stopBtn.addEventListener("click", stopInterview);
 // submitBtn.addEventListener("click", submitAnswer);
 
-// fronted/audio.js
+
 
 
 // frontend/audio.js
+
+// frontend/audio.js
+
+/* =======================
+   TIMER STATE
+======================= */
+
+let warned10Min = false;
+let warned5Min = false;
+
+let totalSeconds = 0;
+let remainingSeconds = 0;
+let timerInterval = null;
+let isTimerPaused = false;
+
+/* =======================
+   AUDIO / WS STATE
+======================= */
 
 let audioContext = null;
 let processor = null;
 let source = null;
 let stream = null;
+
 let isRunning = false;
 let sessionId = null;
 let silenceTimeout = null;
-let ws;
+let ws = null;
 
 // Mic + TTS state
 let micEnabled = false;
 let isAISpeaking = false;
 
-// Buttons
+/* =======================
+   UI ELEMENTS
+======================= */
+
 const resumeInput = document.getElementById("resumeFile");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const submitBtn = document.getElementById("submitBtn");
 
-// Enable start button after file selection
-resumeInput.addEventListener("change", () => startBtn.disabled = false);
+resumeInput.addEventListener("change", () => {
+    startBtn.disabled = false;
+});
 
-// Upload resume & create session
+/* =======================
+   RESUME UPLOAD
+======================= */
+
 async function uploadResume() {
     const file = resumeInput.files[0];
     if (!file) return null;
@@ -513,21 +539,87 @@ async function uploadResume() {
     formData.append("job_description", "Python Developer");
 
     try {
-        const response = await fetch("http://localhost:8000/upload_resume", {
+        const res = await fetch("http://localhost:8000/upload_resume", {
             method: "POST",
             body: formData
         });
-        if (!response.ok) throw new Error(await response.text());
-        const data = await response.json();
+
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
         return data.session_id;
+
     } catch (err) {
         console.error("Resume upload failed:", err);
-        alert("Resume upload failed! Check console for details.");
+        alert("Resume upload failed");
         return null;
     }
 }
 
-// Convert Float32Array to 16-bit PCM
+/* =======================
+   TIMER HELPERS
+======================= */
+
+function formatTime(seconds) {
+    if (typeof seconds !== "number" || isNaN(seconds) || seconds < 0) {
+        return "00:00";
+    }
+    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const s = Math.floor(seconds % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+}
+
+function updateTimerUI(seconds) {
+    const timerEl = document.getElementById("timer");
+    if (!timerEl || typeof seconds !== "number" || isNaN(seconds)) return;
+
+    timerEl.textContent = `⏱️ ${formatTime(seconds)}`;
+    timerEl.classList.remove("green", "yellow", "red");
+
+    if (seconds <= 300) {
+        timerEl.classList.add("red");
+        if (!warned5Min) {
+            warned5Min = true;
+            alert("⏰ 5 minutes remaining. Please wrap up your answers.");
+        }
+    } else if (seconds <= 600) {
+        timerEl.classList.add("yellow");
+        if (!warned10Min) {
+            warned10Min = true;
+            alert("⏰ 10 minutes remaining. Please manage your time wisely.");
+        }
+    } else {
+        timerEl.classList.add("green");
+    }
+}
+
+function startLocalCountdown() {
+    if (timerInterval) return;
+
+    timerInterval = setInterval(() => {
+        if (!isRunning || isTimerPaused || remainingSeconds <= 0) return;
+
+        remainingSeconds--;
+        updateTimerUI(remainingSeconds);
+    }, 1000);
+}
+
+function stopTimer() {
+    clearInterval(timerInterval);
+    timerInterval = null;
+}
+
+function pauseTimer() {
+    isTimerPaused = true;
+}
+
+function resumeTimer() {
+    isTimerPaused = false;
+}
+
+/* =======================
+   AUDIO HELPERS
+======================= */
+
 function floatTo16BitPCM(float32Array) {
     const buffer = new ArrayBuffer(float32Array.length * 2);
     const view = new DataView(buffer);
@@ -538,191 +630,188 @@ function floatTo16BitPCM(float32Array) {
     return buffer;
 }
 
-// Play WAV audio from server
 async function playAudioBytes(arrayBuffer) {
-    if (!arrayBuffer || arrayBuffer.byteLength === 0 || !audioContext) return;
+    if (!arrayBuffer || !audioContext) return;
 
     isAISpeaking = true;
-    micEnabled = false;
+    pauseTimer();
     muteMic();
     submitBtn.disabled = true;
 
     try {
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        const sourceNode = audioContext.createBufferSource();
-        sourceNode.buffer = audioBuffer;
-        sourceNode.connect(audioContext.destination);
+        const src = audioContext.createBufferSource();
+        src.buffer = audioBuffer;
+        src.connect(audioContext.destination);
 
-        await new Promise((resolve, reject) => {
-            sourceNode.onended = resolve;
-            sourceNode.onerror = reject;
-            sourceNode.start(0);
+        await new Promise(resolve => {
+            src.onended = resolve;
+            src.start(0);
         });
-    } catch (err) {
-        console.error("Audio playback failed:", err);
+
+    } catch (e) {
+        console.error("TTS playback error:", e);
     } finally {
         isAISpeaking = false;
-        micEnabled = true;
+        resumeTimer();
         unmuteMic();
         submitBtn.disabled = false;
+        resetSilenceTimer();
     }
 }
 
-// Mic control
-function muteMic() { if (processor && source) { try { processor.disconnect(); source.disconnect(); } catch{} } micEnabled = false; }
-function unmuteMic() { if (processor && source && audioContext && isRunning) { try { source.connect(processor); processor.connect(audioContext.destination); } catch{} } micEnabled = true; }
+/* =======================
+   MIC CONTROL
+======================= */
 
-// Reset silence timer
+function muteMic() {
+    try {
+        processor?.disconnect();
+        source?.disconnect();
+    } catch {}
+    micEnabled = false;
+}
+
+function unmuteMic() {
+    try {
+        if (audioContext && processor && source && isRunning) {
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            micEnabled = true;
+        }
+    } catch {}
+}
+
+/* =======================
+   SILENCE TIMER
+======================= */
+
 function resetSilenceTimer() {
     clearTimeout(silenceTimeout);
     silenceTimeout = setTimeout(() => {
         if (isRunning && !isAISpeaking) submitAnswer();
-    }, 10000); // 10s
+    }, 10000);
 }
 
-// Start interview
+/* =======================
+   START INTERVIEW
+======================= */
+
 async function startInterview() {
     if (isRunning) return;
     isRunning = true;
 
-    sessionId = await uploadResume();
-    if (!sessionId) { isRunning = false; return; }
+    warned10Min = false;
+    warned5Min = false;
 
-    const transcriptDiv = document.getElementById("transcript");
-    const feedbackDiv = document.getElementById("feedback");
-    transcriptDiv.textContent = "Interview starting...\n";
-    feedbackDiv.textContent = "Feedback will appear here after the interview.";
+    sessionId = await uploadResume();
+    if (!sessionId) {
+        isRunning = false;
+        return;
+    }
+
+    const transcript = document.getElementById("transcript");
+    transcript.textContent = "Interview starting...\n";
 
     ws = new WebSocket(`ws://localhost:8000/ws/interview?session_id=${sessionId}`);
     ws.binaryType = "arraybuffer";
-
-    ws.onopen = () => console.log("WebSocket connected");
 
     ws.onmessage = async (event) => {
         if (!isRunning) return;
 
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
+
             switch (data.type) {
+                case "TIMER_INIT":
+                    totalSeconds = data.total_seconds;
+                    remainingSeconds = totalSeconds;
+                    updateTimerUI(remainingSeconds);
+                    startLocalCountdown();
+                    break;
+
+                case "TIMER_UPDATE":
+                    remainingSeconds = data.remaining_seconds;
+                    updateTimerUI(remainingSeconds);
+                    break;
+
                 case "QUESTION":
-                    transcriptDiv.textContent += `\n❓ ${data.text}\n`;
-                    transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+                    transcript.textContent += `\n❓ ${data.text}\n`;
                     resetSilenceTimer();
                     break;
 
                 case "FINAL_TRANSCRIPT":
-                    transcriptDiv.textContent += `\nYou: ${data.text}\n`;
-                    transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+                    transcript.textContent += `\nYou: ${data.text}\n`;
                     break;
 
                 case "END":
-                    await displaySummary(data.summary, transcriptDiv);
-                    console.log("Interview finished. Closing WebSocket...");
-                    if (ws && ws.readyState === WebSocket.OPEN) ws.close();
                     stopInterview(false);
                     break;
-
-                case "ERROR":
-                    alert(`Error: ${data.text}`);
-                    stopInterview();
-                    break;
             }
-        } else if (event.data instanceof ArrayBuffer) {
+        } else {
             await playAudioBytes(event.data);
         }
     };
 
-    ws.onerror = (err) => console.error("WebSocket error:", err);
-    ws.onclose = () => { console.log("WebSocket closed"); isRunning = false; };
+    audioContext = new AudioContext({ sampleRate: 16000 });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    // Initialize audio
-    try {
-        audioContext = new AudioContext({ sampleRate: 16000 });
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } });
-        source = audioContext.createMediaStreamSource(stream);
-        processor = audioContext.createScriptProcessor(4096, 1, 1);
+    source = audioContext.createMediaStreamSource(stream);
+    processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        processor.onaudioprocess = (e) => {
-            if (!isRunning || !micEnabled || isAISpeaking) return;
-            const input = e.inputBuffer.getChannelData(0);
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(floatTo16BitPCM(input));
-            }
-            resetSilenceTimer();
-        };
+    processor.onaudioprocess = (e) => {
+        if (!isRunning || !micEnabled || isAISpeaking) return;
+        ws?.send(floatTo16BitPCM(e.inputBuffer.getChannelData(0)));
+        resetSilenceTimer();
+    };
 
-        unmuteMic();
-        stopBtn.disabled = false;
-        submitBtn.disabled = false;
-
-    } catch (err) {
-        console.error("Audio initialization failed:", err);
-        alert("Microphone access denied or unavailable");
-        stopInterview();
-    }
+    unmuteMic();
 }
 
-// Stop interview safely
-function stopInterview(resetButtons = true) {
+/* =======================
+   STOP INTERVIEW
+======================= */
+
+function stopInterview(reset = true) {
     isRunning = false;
+    pauseTimer();
+    stopTimer();
     clearTimeout(silenceTimeout);
 
-    if (processor) { try { processor.disconnect(); } catch{} processor = null; }
-    if (source) { try { source.disconnect(); } catch{} source = null; }
-    if (audioContext) { audioContext.close(); audioContext = null; }
-    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    try {
+        processor?.disconnect();
+        source?.disconnect();
+        audioContext?.close();
+        stream?.getTracks().forEach(t => t.stop());
+    } catch {}
 
-    if (resetButtons) {
+    if (reset) {
         startBtn.disabled = false;
         stopBtn.disabled = true;
         submitBtn.disabled = true;
     }
 }
 
-// Submit answer manually
+/* =======================
+   SUBMIT ANSWER
+======================= */
+
 function submitAnswer() {
-    if (!isRunning || isAISpeaking) return;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
-    resetSilenceTimer();
+    if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
+    }
 }
 
-// Display summary
-async function displaySummary(summary, container) {
-    if (!summary) return;
+/* =======================
+   EVENTS
+======================= */
 
-    const summaryDiv = document.createElement("div");
-    summaryDiv.style.background = "#f3f4f6";
-    summaryDiv.style.border = "1px solid #d1d5db";
-    summaryDiv.style.borderRadius = "8px";
-    summaryDiv.style.padding = "15px";
-    summaryDiv.style.marginTop = "20px";
-    summaryDiv.style.fontFamily = "monospace";
-    summaryDiv.style.whiteSpace = "pre-wrap";
+startBtn.addEventListener("click", async () => {
+    startBtn.disabled = true;
+    await startInterview();
+});
 
-    let text = `\n${"=".repeat(60)}\nFINAL INTERVIEW SUMMARY\n${"=".repeat(60)}\n\n`;
-    text += `Average Score: ${summary.average_score}\nResult: ${summary.result}\n\n`;
-
-    summary.questions.forEach((q, i) => {
-        const ans = summary.answers[i] || "No answer provided";
-        const scores = summary.scores[i] || {};
-        text += `${"-".repeat(60)}\nQ${i+1}: ${q}\nYour Answer: ${ans}\nScores:\n`;
-        text += `  • Correctness: ${scores.semantic_correctness ?? 0}\n`;
-        text += `  • Depth: ${scores.reasoning_quality ?? 0}\n`;
-        text += `  • Clarity: ${scores.clarity ?? 0}\n`;
-        text += `  • Final: ${scores.final_score ?? 0}\n\n`;
-    });
-
-    if (summary.feedback) text += `Overall Feedback:\n${summary.feedback}\n`;
-    text += `${"=".repeat(60)}\n`;
-
-    summaryDiv.textContent = text;
-    container.appendChild(summaryDiv);
-    container.scrollTop = container.scrollHeight;
-}
-
-// Button events
-startBtn.addEventListener("click", async () => { startBtn.disabled = true; await startInterview(); });
 stopBtn.addEventListener("click", stopInterview);
 submitBtn.addEventListener("click", submitAnswer);
 
-console.log("Audio.js loaded successfully");
+console.log("audio.js loaded successfully");

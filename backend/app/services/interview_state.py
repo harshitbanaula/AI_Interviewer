@@ -209,7 +209,10 @@
 
 
 # backend/app/services/interview_state.py
+
+
 import uuid
+import time
 from typing import Dict, List, Optional
 
 from app.services.question_generator import generate_question
@@ -221,6 +224,10 @@ class InterviewSession:
 
     MAX_TECH_QUESTIONS = 10
     MAX_RETRY = 5
+
+    # Global Timing config
+    SESSION_LIMIT_SECONDS = 45 * 60
+    GRACE_PERIOD_SECONDS = 2 * 60
 
     def __init__(self, resume_text: str, job_description: str):
         self.resume_text = resume_text
@@ -239,6 +246,11 @@ class InterviewSession:
         # Adaptive Intelligence State(Decision based flow)
         self.current_topic: Optional[str] = None
         self.topic_weakness: Dict[str, int] = {}
+
+        # Timing State
+        self.session_start_time: float = time.time()
+        self.current_question_start: Optional[float] = None
+        self.answer_durations: List[float] =[]
 
         self.feedback_text: str = ""
 
@@ -300,14 +312,20 @@ class InterviewSession:
     def next_question(self) -> Optional[str]:
         if self.completed:
             return None
+        
+        elapsed = time.time() -self.session_start_time
+        hard_cap = self.SESSION_LIMIT_SECONDS + self.GRACE_PERIOD_SECONDS
 
-        # Stop condition (intro + tech questions)
-        if len(self.questions) >= self.MAX_TECH_QUESTIONS + 1:
+        # Hard stop
+
+        if elapsed >= hard_cap:
             self.completed = True
             self.generate_feedback()
             return None
+        
 
         self.expecting_answer = True
+
         # Intro 
         if self.stage == "INTRO":
             self.stage = "TECH_SWITCH"
@@ -317,6 +335,7 @@ class InterviewSession:
 
         self.questions.append(q)
         self.current_topic = self._detect_topic(q)
+        self.current_question_start = time.time()
 
         return q
 
@@ -328,6 +347,15 @@ class InterviewSession:
         answer_text = answer.strip() or "No answer provided"
         question = self.questions[-1]
 
+        # Track answer time
+        if self.current_question_start:
+            duration = round(time.time() - self.current_question_start,2)
+            self.answer_durations.append(duration)
+        else:
+            self.answer_durations.append(0.0)
+
+        self.current_question_start = None
+        
         set_current_question(question)
         score = score_answer(answer_text, question)
 
@@ -362,6 +390,8 @@ class InterviewSession:
     # Final Result
 
     def final_result(self) -> dict:
+        total_time = round(time.time() - self.session_start_time, 2)
+    
         avg_score = round(
             sum(s["final_score"] for s in self.scores) / len(self.scores),
             2
@@ -370,6 +400,8 @@ class InterviewSession:
         return {
             "average_score": avg_score,
             "result": "PASS" if avg_score >= 0.7 else "FAIL",
+            "total_duration_seconds": total_time,
+            "time_per_answer_seconds": self.answer_durations,
             "questions": self.questions,
             "answers": self.answers,
             "scores": self.scores,

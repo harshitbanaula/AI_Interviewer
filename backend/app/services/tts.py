@@ -105,7 +105,6 @@ import re
 
 # Local setup for Kakao VITS TTS
 
-
 MODEL_NAME = "kakao-enterprise/vits-vctk"
 DEVICE = "cpu"
 
