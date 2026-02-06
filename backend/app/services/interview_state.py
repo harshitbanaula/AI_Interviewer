@@ -212,8 +212,6 @@
 
 
 
-
-
 # backend/app/services/interview_state.py
 
 import uuid
@@ -230,8 +228,8 @@ class InterviewSession:
     MAX_TECH_QUESTIONS = 10
     MAX_RETRY = 5
 
-    SESSION_LIMIT_SECONDS = 45 * 60  # 45 minutes
-    GRACE_PERIOD_SECONDS = 2 * 60    # 2 minutes grace period
+    SESSION_LIMIT_SECONDS = 45 * 60
+    GRACE_PERIOD_SECONDS = 2 * 60
 
     def __init__(self, resume_text: str, job_description: str):
         self.resume_text = resume_text
@@ -261,28 +259,31 @@ class InterviewSession:
     # =======================
 
     def _time_exceeded(self) -> bool:
-        """Check if total time limit exceeded (including grace period)"""
         elapsed = time.time() - self.session_start_time
         return elapsed >= (self.SESSION_LIMIT_SECONDS + self.GRACE_PERIOD_SECONDS)
 
     def _question_limit_reached(self) -> bool:
-        """Check if maximum questions asked (INTRO + MAX_TECH_QUESTIONS)"""
-        return len(self.questions) >= (self.MAX_TECH_QUESTIONS + 1)
+        """
+        Check if we've asked the maximum number of questions.
+        We need ANSWERS for all questions before ending.
+        """
+        total_allowed = self.MAX_TECH_QUESTIONS + 1  # 1 INTRO + 10 TECH = 11 total
+        
+        # Check if we've ANSWERED all allowed questions
+        return len(self.answers) >= total_allowed
 
     def _should_end_interview(self) -> bool:
-        """Determine if interview should end"""
-        return self.completed or self._time_exceeded() or self._question_limit_reached()
+        return self.completed or self._time_exceeded()
 
     def _finalize_interview(self):
-        """Force finalize the interview and generate feedback"""
         if self.completed:
-            return  # Already finalized
+            return
 
         self.completed = True
         self.expecting_answer = False
         self.current_question_start = None
         
-        # CRITICAL: Always generate feedback when finalizing
+        # ALWAYS generate feedback
         self.generate_feedback()
 
     # =======================
@@ -293,14 +294,12 @@ class InterviewSession:
         return question.strip() in self.questions
 
     def _detect_topic(self, question: str) -> Optional[str]:
-        """Detect which project/topic this question is about"""
         for project in self.covered_projects:
             if project.lower() in question.lower():
                 return project
         return None
 
     def _classify_answer(self, score: float) -> str:
-        """Classify answer quality to determine next action"""
         if score >= 0.75:
             return "STRONG"
         elif score >= 0.40:
@@ -308,7 +307,6 @@ class InterviewSession:
         return "WEAK"
 
     def _decide_next_stage(self, topic: Optional[str], classification: str) -> str:
-        """Adaptive logic: decide what type of question to ask next"""
         if not topic:
             return "TECH_SWITCH"
 
@@ -319,12 +317,10 @@ class InterviewSession:
         if classification == "CONFUSED":
             return "TECH_CLARIFY"
 
-        # WEAK answer
         self.topic_weakness[topic] = self.topic_weakness.get(topic, 0) + 1
         return "TECH_SWITCH" if self.topic_weakness[topic] >= 2 else "TECH_SIMPLIFY"
 
     def _generate_unique_question(self, stage: str) -> str:
-        """Generate a unique question using LLM"""
         for _ in range(self.MAX_RETRY):
             result = generate_question(
                 job_description=self.job_description,
@@ -348,33 +344,36 @@ class InterviewSession:
 
     def next_question(self) -> Optional[str]:
         """
-        Generate and return the next question.
-        Returns None if interview should end.
+        Generate next question.
+        Returns None ONLY if interview should end.
         """
-        # HARD STOP - check all termination conditions
-        if self._should_end_interview():
+        # Check time limit
+        if self._time_exceeded():
             self._finalize_interview()
             return None
 
-        # Do NOT allow skipping answers
+        # Already completed
+        if self.completed:
+            return None
+
+        # Don't allow new question if waiting for answer
         if self.expecting_answer:
             return None
 
-        # Double-check question limit before generating
+        # Check if we've ANSWERED all questions (not just asked)
         if self._question_limit_reached():
             self._finalize_interview()
             return None
 
         self.expecting_answer = True
 
-        # Generate question based on stage
+        # Generate question
         if self.stage == "INTRO":
             q = "Please briefly introduce yourself and your professional background."
-            self.stage = "TECH_SWITCH"  # Move to technical questions
+            self.stage = "TECH_SWITCH"
         else:
             q = self._generate_unique_question(self.stage)
 
-        # Track question
         self.questions.append(q)
         self.current_topic = self._detect_topic(q)
         self.current_question_start = time.time()
@@ -383,13 +382,12 @@ class InterviewSession:
 
     def save_answer(self, answer: str):
         """
-        Save the candidate's answer and adaptively decide next question type.
+        Save answer and decide next action.
         """
-        # Ignore if not expecting answer or already completed
         if self.completed or not self.expecting_answer:
             return
 
-        # Check time limit before processing
+        # Check time
         if self._time_exceeded():
             self._finalize_interview()
             return
@@ -397,7 +395,7 @@ class InterviewSession:
         answer_text = answer.strip() or "No answer provided"
         question = self.questions[-1]
 
-        # Track answer duration
+        # Track duration
         if self.current_question_start:
             self.answer_durations.append(
                 round(time.time() - self.current_question_start, 2)
@@ -407,48 +405,40 @@ class InterviewSession:
 
         self.current_question_start = None
 
-        # Score the answer
+        # Score answer
         set_current_question(question)
         score = score_answer(answer_text, question)
 
         self.answers.append(answer_text)
         self.scores.append(score)
 
-        # Adaptive logic: determine next question type
+        # Adaptive logic
         classification = self._classify_answer(score["final_score"])
         self.stage = self._decide_next_stage(self.current_topic, classification)
 
         self.expecting_answer = False
 
-        # Check if we've reached question limit after saving answer
-        if self._question_limit_reached():
-            self._finalize_interview()
+        # DON'T finalize here - let next_question() decide
+        # This allows the last question to be answered
 
     # =======================
     # FEEDBACK & RESULT
     # =======================
 
     def generate_feedback(self):
-        """Generate comprehensive feedback using LLM"""
         qa_list = []
         for i, q in enumerate(self.questions):
             ans = self.answers[i] if i < len(self.answers) else "No answer provided"
             sc = self.scores[i] if i < len(self.scores) else score_answer(ans, q)
-            qa_list.append({
-                "question": q,
-                "answer": ans,
-                "scores": sc
-            })
+            qa_list.append({"question": q, "answer": ans, "scores": sc})
 
         avg_score = round(
             sum(s["final_score"] for s in self.scores) / len(self.scores), 2
         ) if self.scores else 0.0
 
-        # Generate LLM-based feedback
         self.feedback_text = generate_feedback(qa_list, avg_score)
 
     def final_result(self) -> dict:
-        """Return complete interview results"""
         total_time = round(time.time() - self.session_start_time, 2)
         avg_score = round(
             sum(s["final_score"] for s in self.scores) / len(self.scores), 2
@@ -468,7 +458,6 @@ class InterviewSession:
         }
 
     def _get_completion_reason(self) -> str:
-        """Determine why the interview ended"""
         if self._time_exceeded():
             return "TIME_LIMIT_EXCEEDED"
         elif self._question_limit_reached():
@@ -477,23 +466,19 @@ class InterviewSession:
             return "COMPLETED_NORMALLY"
 
     def get_remaining_time(self) -> int:
-        """Get remaining time in seconds"""
         elapsed = time.time() - self.session_start_time
         remaining = max(self.SESSION_LIMIT_SECONDS - elapsed, 0)
         return int(remaining)
 
 
+# =======================
 # SESSION STORE
-
+# =======================
 
 _sessions: Dict[str, InterviewSession] = {}
 
 
 def create_session(session_id: str, job_description: str, resume_text: str) -> str:
-    """
-    Create a new interview session with given ID.
-    Note: session_id is passed in (generated by caller)
-    """
     _sessions[session_id] = InterviewSession(
         resume_text=resume_text,
         job_description=job_description
@@ -502,5 +487,4 @@ def create_session(session_id: str, job_description: str, resume_text: str) -> s
 
 
 def get_session(session_id: str) -> Optional[InterviewSession]:
-    """Retrieve an existing session"""
     return _sessions.get(session_id)

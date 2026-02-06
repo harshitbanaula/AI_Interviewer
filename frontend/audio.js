@@ -477,14 +477,10 @@
 // submitBtn.addEventListener("click", submitAnswer);
 
 
-
-
 // frontend/audio.js
 
-// frontend/audio.js - IMPROVED WITH DEBUGGING
-
 /* =======================
-   TIMER STATE
+TIMER STATE
 ======================= */
 
 let warned10Min = false;
@@ -731,28 +727,76 @@ function resetSilenceTimer() {
 }
 
 /* =======================
+   SCORE FORMATTING
+======================= */
+
+function getScoreEmoji(score) {
+    if (score >= 0.75) return "🟢";
+    if (score >= 0.50) return "🟡";
+    if (score >= 0.25) return "🟠";
+    return "🔴";
+}
+
+function getScoreGrade(score) {
+    if (score >= 0.90) return "Excellent";
+    if (score >= 0.75) return "Good";
+    if (score >= 0.60) return "Average";
+    if (score >= 0.40) return "Below Average";
+    return "Poor";
+}
+
+/* =======================
    DISPLAY RESULTS
 ======================= */
 
 function displayResults(summary) {
     const transcript = document.getElementById("transcript");
     
-    transcript.textContent += "\n\n" + "=".repeat(50) + "\n";
-    transcript.textContent += "📊 INTERVIEW COMPLETED\n";
-    transcript.textContent += "=".repeat(50) + "\n\n";
+    transcript.textContent += "\n\n" + "=".repeat(70) + "\n";
+    transcript.textContent += "                    📊 INTERVIEW RESULTS\n";
+    transcript.textContent += "=".repeat(70) + "\n\n";
     
-    transcript.textContent += `Average Score: ${summary.average_score.toFixed(2)}\n`;
-    transcript.textContent += `Result: ${summary.result}\n`;
-    transcript.textContent += `Duration: ${Math.floor(summary.total_duration_seconds / 60)}m ${Math.floor(summary.total_duration_seconds % 60)}s\n`;
-    transcript.textContent += `Questions Asked: ${summary.questions.length}\n`;
-    transcript.textContent += `Completion Reason: ${summary.completion_reason}\n\n`;
+    // SECTION 1: QUESTION-WISE SCORES
+    transcript.textContent += "━━━━━━━━━━━━━━━━━━━ QUESTION-WISE SCORES ━━━━━━━━━━━━━━━━━━\n\n";
     
-    if (summary.feedback) {
-        transcript.textContent += "📝 FEEDBACK:\n";
-        transcript.textContent += "-".repeat(50) + "\n";
-        transcript.textContent += summary.feedback + "\n\n";
+    summary.questions.forEach((question, index) => {
+        const score = summary.scores[index];
+        const duration = summary.time_per_answer_seconds ? summary.time_per_answer_seconds[index] : 0;
+        
+        const emoji = getScoreEmoji(score.final_score);
+        const grade = getScoreGrade(score.final_score);
+        
+        transcript.textContent += `Q${index + 1}. ${question}\n`;
+        transcript.textContent += `    ${emoji} Score: ${score.final_score.toFixed(2)} (${grade}) | Time: ${Math.floor(duration)}s\n\n`;
+    });
+    
+    // SECTION 2: OVERALL SUMMARY
+    transcript.textContent += "\n━━━━━━━━━━━━ OVERALL SUMMARY ━━━━━━━━━━━━━━\n\n";
+
+    transcript.textContent += `Final Result:        ${summary.result === 'PASS' ? '✅ PASS' : '❌ FAIL'}\n`;
+    transcript.textContent += `Average Score:       ${summary.average_score.toFixed(2)} / 1.00\n`;
+    transcript.textContent += `Total Questions:     ${summary.questions.length}\n`;
+    transcript.textContent += `Total Duration:      ${Math.floor(summary.total_duration_seconds / 60)}m ${Math.floor(summary.total_duration_seconds % 60)}s\n`;
+    transcript.textContent += `Completion Reason:   ${summary.completion_reason.replace(/_/g, ' ')}\n`;
+    
+    if (summary.covered_projects && summary.covered_projects.length > 0) {
+        transcript.textContent += `Projects Discussed:  ${summary.covered_projects.join(', ')}\n`;
     }
     
+    // SECTION 3: DETAILED FEEDBACK
+    if (summary.feedback && summary.feedback.trim()) {
+        transcript.textContent += "\n━━━━━━━━━━━━━━━━━━━━━━ FEEDBACK ━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+        transcript.textContent += summary.feedback + "\n";
+    } else {
+        transcript.textContent += "\n━━━━━━━━━━━━━━━━━━━━━━ FEEDBACK ━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+        transcript.textContent += "Feedback generation in progress...\n";
+    }
+    
+    transcript.textContent += "\n" + "=".repeat(70) + "\n";
+    transcript.textContent += "           Thank you for completing the interview!\n";
+    transcript.textContent += "=".repeat(70) + "\n\n";
+    
+    // Scroll to bottom
     transcript.scrollTop = transcript.scrollHeight;
 }
 
@@ -771,7 +815,6 @@ async function startInterview() {
     warned10Min = false;
     warned5Min = false;
 
-    // Step 1: Upload resume
     sessionId = await uploadResume();
     if (!sessionId) {
         isRunning = false;
@@ -781,22 +824,18 @@ async function startInterview() {
     const transcript = document.getElementById("transcript");
     transcript.textContent = "Interview starting...\n";
 
-    // Step 2: Connect WebSocket
     const wsUrl = `ws://localhost:8000/ws/interview?session_id=${sessionId}`;
     log(`Connecting to WebSocket: ${wsUrl}`, "info");
 
     ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
-    // WebSocket event handlers
     ws.onopen = () => {
         log("WebSocket connection established", "success");
         transcript.textContent += "✅ Connected to interview server\n";
     };
 
     ws.onmessage = async (event) => {
-        if (!isRunning) return;
-
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
             log(`Received message type: ${data.type}`, "info");
@@ -819,17 +858,17 @@ async function startInterview() {
                     transcript.textContent += `\n❓ ${data.text}\n`;
                     transcript.scrollTop = transcript.scrollHeight;
                     resetSilenceTimer();
-                    log(`Question received: ${data.text.substring(0, 50)}...`, "info");
+                    log(`Question received`, "info");
                     break;
 
                 case "FINAL_TRANSCRIPT":
                     transcript.textContent += `\nYou: ${data.text}\n`;
                     transcript.scrollTop = transcript.scrollHeight;
-                    log(`Answer transcribed: ${data.text.substring(0, 50)}...`, "success");
+                    log(`Answer transcribed`, "success");
                     break;
 
                 case "END":
-                    log("Interview ended by server", "success");
+                    log("Interview ended - displaying results", "success");
                     displayResults(data.summary);
                     stopInterview(false);
                     break;
@@ -849,27 +888,25 @@ async function startInterview() {
                     break;
             }
         } else {
-            // Binary audio data
             log(`Received audio data: ${event.data.byteLength} bytes`, "info");
             await playAudioBytes(event.data);
         }
     };
 
     ws.onerror = (error) => {
-        log(`WebSocket error: ${error}`, "error");
+        log(`WebSocket error`, "error");
         console.error("WebSocket error details:", error);
-        alert("WebSocket connection error. Please check:\n1. Backend server is running\n2. Port 8000 is accessible\n3. Check browser console for details");
+        alert("WebSocket connection error. Please check backend server.");
         stopInterview(false);
     };
 
     ws.onclose = (event) => {
-        log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`, "warning");
+        log(`WebSocket closed. Code: ${event.code}`, "warning");
         if (isRunning) {
             stopInterview(false);
         }
     };
 
-    // Step 3: Setup microphone (wait for WebSocket to open)
     try {
         log("Requesting microphone access...", "info");
         audioContext = new AudioContext({ sampleRate: 16000 });
@@ -890,7 +927,6 @@ async function startInterview() {
         unmuteMic();
         log("Audio processing started", "success");
 
-        // Enable controls
         stopBtn.disabled = false;
         submitBtn.disabled = false;
 
