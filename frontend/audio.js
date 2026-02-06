@@ -481,7 +481,7 @@
 
 // frontend/audio.js
 
-// frontend/audio.js
+// frontend/audio.js - IMPROVED WITH DEBUGGING
 
 /* =======================
    TIMER STATE
@@ -527,12 +527,33 @@ resumeInput.addEventListener("change", () => {
 });
 
 /* =======================
+   LOGGING HELPER
+======================= */
+
+function log(message, type = "info") {
+    const timestamp = new Date().toLocaleTimeString();
+    const prefix = {
+        "info": "ℹ️",
+        "success": "✅",
+        "error": "❌",
+        "warning": "⚠️"
+    }[type] || "ℹ️";
+    
+    console.log(`[${timestamp}] ${prefix} ${message}`);
+}
+
+/* =======================
    RESUME UPLOAD
 ======================= */
 
 async function uploadResume() {
     const file = resumeInput.files[0];
-    if (!file) return null;
+    if (!file) {
+        log("No resume file selected", "error");
+        return null;
+    }
+
+    log(`Uploading resume: ${file.name}`, "info");
 
     const formData = new FormData();
     formData.append("file", file);
@@ -544,13 +565,18 @@ async function uploadResume() {
             body: formData
         });
 
-        if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
+        
+        if (!res.ok) {
+            throw new Error(data.error || await res.text());
+        }
+        
+        log(`Resume uploaded successfully. Session ID: ${data.session_id}`, "success");
         return data.session_id;
 
     } catch (err) {
-        console.error("Resume upload failed:", err);
-        alert("Resume upload failed");
+        log(`Resume upload failed: ${err.message}`, "error");
+        alert(`Resume upload failed: ${err.message}`);
         return null;
     }
 }
@@ -600,6 +626,10 @@ function startLocalCountdown() {
 
         remainingSeconds--;
         updateTimerUI(remainingSeconds);
+
+        if (remainingSeconds <= 0) {
+            stopTimer();
+        }
     }, 1000);
 }
 
@@ -650,13 +680,15 @@ async function playAudioBytes(arrayBuffer) {
         });
 
     } catch (e) {
-        console.error("TTS playback error:", e);
+        log(`TTS playback error: ${e.message}`, "error");
     } finally {
         isAISpeaking = false;
-        resumeTimer();
-        unmuteMic();
-        submitBtn.disabled = false;
-        resetSilenceTimer();
+        if (isRunning) {
+            resumeTimer();
+            unmuteMic();
+            submitBtn.disabled = false;
+            resetSilenceTimer();
+        }
     }
 }
 
@@ -688,9 +720,40 @@ function unmuteMic() {
 
 function resetSilenceTimer() {
     clearTimeout(silenceTimeout);
-    silenceTimeout = setTimeout(() => {
-        if (isRunning && !isAISpeaking) submitAnswer();
-    }, 10000);
+    if (isRunning && !isAISpeaking) {
+        silenceTimeout = setTimeout(() => {
+            if (isRunning && !isAISpeaking) {
+                log("10 seconds of silence detected - auto-submitting answer", "info");
+                submitAnswer();
+            }
+        }, 10000);
+    }
+}
+
+/* =======================
+   DISPLAY RESULTS
+======================= */
+
+function displayResults(summary) {
+    const transcript = document.getElementById("transcript");
+    
+    transcript.textContent += "\n\n" + "=".repeat(50) + "\n";
+    transcript.textContent += "📊 INTERVIEW COMPLETED\n";
+    transcript.textContent += "=".repeat(50) + "\n\n";
+    
+    transcript.textContent += `Average Score: ${summary.average_score.toFixed(2)}\n`;
+    transcript.textContent += `Result: ${summary.result}\n`;
+    transcript.textContent += `Duration: ${Math.floor(summary.total_duration_seconds / 60)}m ${Math.floor(summary.total_duration_seconds % 60)}s\n`;
+    transcript.textContent += `Questions Asked: ${summary.questions.length}\n`;
+    transcript.textContent += `Completion Reason: ${summary.completion_reason}\n\n`;
+    
+    if (summary.feedback) {
+        transcript.textContent += "📝 FEEDBACK:\n";
+        transcript.textContent += "-".repeat(50) + "\n";
+        transcript.textContent += summary.feedback + "\n\n";
+    }
+    
+    transcript.scrollTop = transcript.scrollHeight;
 }
 
 /* =======================
@@ -698,12 +761,17 @@ function resetSilenceTimer() {
 ======================= */
 
 async function startInterview() {
-    if (isRunning) return;
-    isRunning = true;
+    if (isRunning) {
+        log("Interview already running", "warning");
+        return;
+    }
 
+    log("Starting interview...", "info");
+    isRunning = true;
     warned10Min = false;
     warned5Min = false;
 
+    // Step 1: Upload resume
     sessionId = await uploadResume();
     if (!sessionId) {
         isRunning = false;
@@ -713,14 +781,25 @@ async function startInterview() {
     const transcript = document.getElementById("transcript");
     transcript.textContent = "Interview starting...\n";
 
-    ws = new WebSocket(`ws://localhost:8000/ws/interview?session_id=${sessionId}`);
+    // Step 2: Connect WebSocket
+    const wsUrl = `ws://localhost:8000/ws/interview?session_id=${sessionId}`;
+    log(`Connecting to WebSocket: ${wsUrl}`, "info");
+
+    ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
+
+    // WebSocket event handlers
+    ws.onopen = () => {
+        log("WebSocket connection established", "success");
+        transcript.textContent += "✅ Connected to interview server\n";
+    };
 
     ws.onmessage = async (event) => {
         if (!isRunning) return;
 
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
+            log(`Received message type: ${data.type}`, "info");
 
             switch (data.type) {
                 case "TIMER_INIT":
@@ -728,6 +807,7 @@ async function startInterview() {
                     remainingSeconds = totalSeconds;
                     updateTimerUI(remainingSeconds);
                     startLocalCountdown();
+                    log(`Timer initialized: ${totalSeconds} seconds`, "success");
                     break;
 
                 case "TIMER_UPDATE":
@@ -737,35 +817,88 @@ async function startInterview() {
 
                 case "QUESTION":
                     transcript.textContent += `\n❓ ${data.text}\n`;
+                    transcript.scrollTop = transcript.scrollHeight;
                     resetSilenceTimer();
+                    log(`Question received: ${data.text.substring(0, 50)}...`, "info");
                     break;
 
                 case "FINAL_TRANSCRIPT":
                     transcript.textContent += `\nYou: ${data.text}\n`;
+                    transcript.scrollTop = transcript.scrollHeight;
+                    log(`Answer transcribed: ${data.text.substring(0, 50)}...`, "success");
                     break;
 
                 case "END":
+                    log("Interview ended by server", "success");
+                    displayResults(data.summary);
                     stopInterview(false);
+                    break;
+
+                case "ERROR":
+                    log(`Server error: ${data.text}`, "error");
+                    alert(`Error: ${data.text}`);
+                    stopInterview(false);
+                    break;
+
+                case "TTS_START":
+                    log("TTS playback starting", "info");
+                    break;
+
+                case "TTS_END":
+                    log("TTS playback ended", "success");
                     break;
             }
         } else {
+            // Binary audio data
+            log(`Received audio data: ${event.data.byteLength} bytes`, "info");
             await playAudioBytes(event.data);
         }
     };
 
-    audioContext = new AudioContext({ sampleRate: 16000 });
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    source = audioContext.createMediaStreamSource(stream);
-    processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-    processor.onaudioprocess = (e) => {
-        if (!isRunning || !micEnabled || isAISpeaking) return;
-        ws?.send(floatTo16BitPCM(e.inputBuffer.getChannelData(0)));
-        resetSilenceTimer();
+    ws.onerror = (error) => {
+        log(`WebSocket error: ${error}`, "error");
+        console.error("WebSocket error details:", error);
+        alert("WebSocket connection error. Please check:\n1. Backend server is running\n2. Port 8000 is accessible\n3. Check browser console for details");
+        stopInterview(false);
     };
 
-    unmuteMic();
+    ws.onclose = (event) => {
+        log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`, "warning");
+        if (isRunning) {
+            stopInterview(false);
+        }
+    };
+
+    // Step 3: Setup microphone (wait for WebSocket to open)
+    try {
+        log("Requesting microphone access...", "info");
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        log("Microphone access granted", "success");
+
+        source = audioContext.createMediaStreamSource(stream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (e) => {
+            if (!isRunning || !micEnabled || isAISpeaking) return;
+            if (ws?.readyState === WebSocket.OPEN) {
+                ws.send(floatTo16BitPCM(e.inputBuffer.getChannelData(0)));
+                resetSilenceTimer();
+            }
+        };
+
+        unmuteMic();
+        log("Audio processing started", "success");
+
+        // Enable controls
+        stopBtn.disabled = false;
+        submitBtn.disabled = false;
+
+    } catch (err) {
+        log(`Microphone access failed: ${err.message}`, "error");
+        alert(`Microphone access denied: ${err.message}`);
+        stopInterview(false);
+    }
 }
 
 /* =======================
@@ -773,17 +906,24 @@ async function startInterview() {
 ======================= */
 
 function stopInterview(reset = true) {
+    log("Stopping interview...", "info");
+    
     isRunning = false;
     pauseTimer();
     stopTimer();
     clearTimeout(silenceTimeout);
 
     try {
+        muteMic();
         processor?.disconnect();
         source?.disconnect();
         audioContext?.close();
         stream?.getTracks().forEach(t => t.stop());
-    } catch {}
+        ws?.close();
+        log("Interview stopped successfully", "success");
+    } catch (e) {
+        log(`Error during cleanup: ${e.message}`, "error");
+    }
 
     if (reset) {
         startBtn.disabled = false;
@@ -797,8 +937,12 @@ function stopInterview(reset = true) {
 ======================= */
 
 function submitAnswer() {
-    if (ws?.readyState === WebSocket.OPEN) {
+    if (ws?.readyState === WebSocket.OPEN && isRunning) {
+        log("Submitting answer...", "info");
         ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
+        clearTimeout(silenceTimeout);
+    } else {
+        log(`Cannot submit: WebSocket state = ${ws?.readyState}`, "warning");
     }
 }
 
@@ -811,7 +955,10 @@ startBtn.addEventListener("click", async () => {
     await startInterview();
 });
 
-stopBtn.addEventListener("click", stopInterview);
+stopBtn.addEventListener("click", () => {
+    stopInterview(true);
+});
+
 submitBtn.addEventListener("click", submitAnswer);
 
-console.log("audio.js loaded successfully");
+log("audio.js loaded successfully", "success");

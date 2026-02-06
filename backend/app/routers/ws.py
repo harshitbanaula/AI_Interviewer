@@ -333,11 +333,13 @@
 #             pass
 
 
+
 # backend/app/routers/ws.py
 
 import time
 import json
-from fastapi import APIRouter, WebSocket, Query
+import asyncio
+from fastapi import APIRouter, WebSocket, Query, WebSocketDisconnect
 from app.services.stt import transcribe_chunk
 from app.services.interview_state import get_session
 from app.services.tts import synthesize_speech
@@ -350,15 +352,52 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
     await ws.accept()
 
     session = get_session(session_id)
-
     if not session:
         await ws.send_json({"type": "ERROR", "text": "Invalid session"})
         await ws.close()
         return
 
+    # Reset start time when WS connects
     session.session_start_time = time.time()
+    socket_open = True
+    end_sent = False
 
-    await ws.send_json({
+    async def safe_send_json(payload: dict):
+        nonlocal socket_open
+        if socket_open:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                socket_open = False
+
+    async def safe_send_bytes(data: bytes):
+        nonlocal socket_open
+        if socket_open:
+            try:
+                await ws.send_bytes(data)
+            except Exception:
+                socket_open = False
+
+    async def send_end_and_close():
+        nonlocal end_sent, socket_open
+        if end_sent or not socket_open:
+            return
+
+        # FORCE FINALIZATION + FEEDBACK
+        if not session.completed:
+            session._finalize_interview()
+
+        summary = session.final_result()
+        await safe_send_json({"type": "END", "summary": summary})
+        end_sent = True
+        socket_open = False
+        
+        # Give client time to receive END message
+        await asyncio.sleep(0.5)
+        await ws.close()
+
+    # Send initial timer
+    await safe_send_json({
         "type": "TIMER_INIT",
         "total_seconds": session.SESSION_LIMIT_SECONDS
     })
@@ -366,65 +405,114 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
     audio_buffer = bytearray()
 
     async def send_question(q: str):
-        elapsed = int(time.time() - session.session_start_time)
-        remaining = max(session.SESSION_LIMIT_SECONDS - elapsed, 0)
+        """Send question with timer update and TTS audio"""
+        if session.completed or not socket_open:
+            return
 
-        await ws.send_json({
+        remaining = session.get_remaining_time()
+
+        # Send timer update
+        await safe_send_json({
             "type": "TIMER_UPDATE",
             "remaining_seconds": remaining
         })
 
-        await ws.send_json({"type": "QUESTION", "text": q})
+        # Send question text
+        await safe_send_json({
+            "type": "QUESTION",
+            "text": q
+        })
 
+        # Synthesize and send TTS audio
         audio = synthesize_speech(q, speaker_id=0, speed=0.85)
-        if audio:
-            await ws.send_json({"type": "TTS_START"})
-            await ws.send_bytes(audio)
-            await ws.send_json({"type": "TTS_END"})
+        if audio and socket_open:
+            await safe_send_json({"type": "TTS_START"})
+            await safe_send_bytes(audio)
+            await safe_send_json({"type": "TTS_END"})
 
-    # First question
+    # Background task to monitor time limit
+    async def monitor_time_limit():
+        """Periodically check if time limit exceeded"""
+        while socket_open and not session.completed:
+            await asyncio.sleep(5)  # Check every 5 seconds
+            
+            if session._time_exceeded():
+                print(f"[SESSION {session_id}] Time limit exceeded - ending interview")
+                await send_end_and_close()
+                break
+
+    # Start time monitor in background
+    time_monitor_task = asyncio.create_task(monitor_time_limit())
+
+    # Send first question
     first_q = session.next_question()
     if first_q:
         await send_question(first_q)
+    else:
+        # Interview already ended (shouldn't happen on first question)
+        await send_end_and_close()
+        time_monitor_task.cancel()
+        return
 
     try:
-        while True:
+        while socket_open:
             msg = await ws.receive()
 
-            # AUDIO
+            # Check if interview should end
+            if session._should_end_interview():
+                await send_end_and_close()
+                break
+
+            # Handle AUDIO data
             if msg.get("bytes") and session.expecting_answer:
                 audio_buffer.extend(msg["bytes"])
                 continue
 
-            # TEXT
+            # Handle TEXT/JSON messages
             if msg.get("text"):
                 payload = json.loads(msg["text"])
 
                 if payload.get("action") == "SUBMIT_ANSWER":
+                    # Transcribe audio buffer or use text
                     if audio_buffer:
                         answer_text = transcribe_chunk(bytes(audio_buffer))
                         audio_buffer.clear()
                     else:
                         answer_text = payload.get("text", "").strip() or "No answer provided"
 
+                    # Save answer (this may trigger finalization)
                     session.save_answer(answer_text)
 
-                    await ws.send_json({
+                    # Send transcript back to user
+                    await safe_send_json({
                         "type": "FINAL_TRANSCRIPT",
                         "text": answer_text
                     })
 
+                    # Check if interview completed after saving answer
+                    if session.completed:
+                        await send_end_and_close()
+                        break
+
+                    # Get next question
                     next_q = session.next_question()
                     if next_q:
                         await send_question(next_q)
                     else:
-                        summary = session.final_result()
-                        await ws.send_json({
-                            "type": "END",
-                            "summary": summary
-                        })
+                        # No more questions - end interview
+                        await send_end_and_close()
                         break
 
+    except WebSocketDisconnect:
+        print(f"[SESSION {session_id}] WebSocket disconnected")
+        socket_open = False
     except Exception as e:
-        print("WebSocket error:", e)
-        await ws.close()
+        print(f"[SESSION {session_id}] WebSocket error: {e}")
+        socket_open = False
+    finally:
+        # Cancel time monitor
+        time_monitor_task.cancel()
+        
+        # Ensure interview is finalized and END is sent
+        if socket_open and not end_sent:
+            await send_end_and_close()
