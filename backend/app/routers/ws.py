@@ -333,8 +333,222 @@
 #             pass
 
 
+# # backend/app/routers/ws.py -
 
-# backend/app/routers/ws.py
+# import time
+# import json
+# import asyncio
+# from fastapi import APIRouter, WebSocket, Query, WebSocketDisconnect
+# from app.services.stt import transcribe_chunk
+# from app.services.interview_state import get_session
+# from app.services.tts import synthesize_speech
+
+# router = APIRouter()
+
+
+# @router.websocket("/ws/interview")
+# async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
+#     await ws.accept()
+
+#     session = get_session(session_id)
+#     if not session:
+#         await ws.send_json({"type": "ERROR", "text": "Invalid session"})
+#         await ws.close()
+#         return
+
+#     session.session_start_time = time.time()
+#     socket_open = True
+#     end_sent = False
+#     buffer_warning_sent = False
+
+#     async def safe_send_json(payload: dict):
+#         nonlocal socket_open
+#         if socket_open:
+#             try:
+#                 await ws.send_json(payload)
+#             except Exception:
+#                 socket_open = False
+
+#     async def safe_send_bytes(data: bytes):
+#         nonlocal socket_open
+#         if socket_open:
+#             try:
+#                 await ws.send_bytes(data)
+#             except Exception:
+#                 socket_open = False
+
+#     async def send_end_and_close():
+#         nonlocal end_sent, socket_open
+#         if end_sent or not socket_open:
+#             return
+
+#         # Force finalization with current answer if needed
+#         if not session.completed:
+#             session._finalize_interview(force_save_current_answer=True)
+
+#         summary = session.final_result()
+#         print(f"[SESSION {session_id}] Sending END. Questions: {summary['questions_asked']}, Answers: {summary['questions_answered']}")
+#         await safe_send_json({"type": "END", "summary": summary})
+#         end_sent = True
+#         socket_open = False
+        
+#         await asyncio.sleep(0.5)
+#         await ws.close()
+
+#     # Send initial timer
+#     await safe_send_json({
+#         "type": "TIMER_INIT",
+#         "main_time_seconds": session.SESSION_LIMIT_SECONDS,
+#         "buffer_time_seconds": session.GRACE_PERIOD_SECONDS
+#     })
+
+#     audio_buffer = bytearray()
+
+#     async def send_question(q: str):
+#         if session.completed or not socket_open:
+#             return
+
+#         # Calculate elapsed time
+#         elapsed = time.time() - session.session_start_time
+        
+#         # Determine which phase we're in
+#         if elapsed < session.SESSION_LIMIT_SECONDS:
+#             # PHASE 1: Main time (0 to 45 minutes)
+#             remaining = int(session.SESSION_LIMIT_SECONDS - elapsed)
+#             in_buffer = False
+#         else:
+#             # PHASE 2: Buffer time (45 to 47 minutes)
+#             buffer_elapsed = elapsed - session.SESSION_LIMIT_SECONDS
+#             remaining = int(session.GRACE_PERIOD_SECONDS - buffer_elapsed)
+#             remaining = max(remaining, 0)  # Don't go negative
+#             in_buffer = True
+
+#         await safe_send_json({
+#             "type": "TIMER_UPDATE",
+#             "remaining_seconds": remaining,
+#             "in_buffer_time": in_buffer
+#         })
+
+#         await safe_send_json({
+#             "type": "QUESTION",
+#             "text": q
+#         })
+
+#         # TTS
+#         audio = synthesize_speech(q, speaker_id=0, speed=0.85)
+#         if audio and socket_open:
+#             await safe_send_json({"type": "TTS_START"})
+#             await safe_send_bytes(audio)
+#             await safe_send_json({"type": "TTS_END"})
+
+#     # Background time monitor
+#     async def monitor_time_limit():
+#         nonlocal buffer_warning_sent
+        
+#         while socket_open and not session.completed:
+#             await asyncio.sleep(1)  # Check every second for accuracy
+            
+#             elapsed = time.time() - session.session_start_time
+            
+#             # Check if we just crossed into buffer time
+#             if elapsed >= session.SESSION_LIMIT_SECONDS and not buffer_warning_sent:
+#                 print(f"[SESSION {session_id}] Main time expired, entering buffer time")
+#                 await safe_send_json({
+#                     "type": "BUFFER_TIME_WARNING",
+#                     "message": "⚠️ Main time expired! You have 2 minutes buffer time remaining."
+#                 })
+#                 buffer_warning_sent = True
+            
+#             # Check if buffer time completely exceeded
+#             if elapsed >= (session.SESSION_LIMIT_SECONDS + session.GRACE_PERIOD_SECONDS):
+#                 print(f"[SESSION {session_id}] Buffer time expired - force ending interview")
+#                 print(f"[SESSION {session_id}] Total elapsed: {elapsed:.2f}s, Limit: {session.SESSION_LIMIT_SECONDS + session.GRACE_PERIOD_SECONDS}s")
+#                 await send_end_and_close()
+#                 break
+
+#     time_monitor_task = asyncio.create_task(monitor_time_limit())
+
+#     # Send FIRST question
+#     first_q = session.next_question()
+#     if first_q:
+#         await send_question(first_q)
+#     else:
+#         await send_end_and_close()
+#         time_monitor_task.cancel()
+#         return
+
+#     try:
+#         while socket_open:
+#             msg = await ws.receive()
+
+#             # Already completed - ignore further messages
+#             if session.completed:
+#                 continue
+
+#             # Handle AUDIO
+#             if msg.get("bytes") and session.expecting_answer:
+#                 audio_buffer.extend(msg["bytes"])
+#                 continue
+
+#             # Handle TEXT
+#             if msg.get("text"):
+#                 payload = json.loads(msg["text"])
+
+#                 if payload.get("action") == "SUBMIT_ANSWER":
+                    
+#                     # Transcribe
+#                     if audio_buffer:
+#                         answer_text = transcribe_chunk(bytes(audio_buffer))
+#                         audio_buffer.clear()
+#                     else:
+#                         answer_text = payload.get("text", "").strip() or "No answer provided"
+
+#                     print(f"[SESSION {session_id}] Answer received: {answer_text[:50]}...")
+
+#                     # Save answer
+#                     session.save_answer(answer_text)
+
+#                     # Send transcript
+#                     await safe_send_json({
+#                         "type": "FINAL_TRANSCRIPT",
+#                         "text": answer_text
+#                     })
+
+#                     # Check if completed AFTER saving
+#                     if session.completed:
+#                         print(f"[SESSION {session_id}] Interview completed after saving answer")
+#                         await send_end_and_close()
+#                         break
+
+#                     # Try to get NEXT question
+#                     next_q = session.next_question()
+                    
+#                     if next_q:
+#                         print(f"[SESSION {session_id}] Sending next question")
+#                         await send_question(next_q)
+#                     else:
+#                         print(f"[SESSION {session_id}] No more questions - ending interview")
+#                         await send_end_and_close()
+#                         break
+
+#     except WebSocketDisconnect:
+#         print(f"[SESSION {session_id}] WebSocket disconnected")
+#         socket_open = False
+#     except Exception as e:
+#         print(f"[SESSION {session_id}] Error: {e}")
+#         import traceback
+#         traceback.print_exc()
+#         socket_open = False
+#     finally:
+#         time_monitor_task.cancel()
+        
+#         if socket_open and not end_sent:
+#             await send_end_and_close()
+
+
+
+
+# backend/app/routers/ws.py - FIXED BUFFER TIME CALCULATIONS
 
 import time
 import json
@@ -357,9 +571,13 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         await ws.close()
         return
 
-    session.session_start_time = time.time()
+    # Start timer if not started
+    if not hasattr(session, 'session_start_time') or session.session_start_time is None:
+        session.session_start_time = time.time()
+        
     socket_open = True
     end_sent = False
+    buffer_warning_sent = False
 
     async def safe_send_json(payload: dict):
         nonlocal socket_open
@@ -382,12 +600,12 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         if end_sent or not socket_open:
             return
 
-        # Force finalization
+        # Force finalization with current answer if needed
         if not session.completed:
-            session._finalize_interview()
+            session._finalize_interview(force_save_current_answer=True)
 
         summary = session.final_result()
-        print(f"[SESSION {session_id}] Sending END with summary")
+        print(f"[SESSION {session_id}] Sending END. Questions: {summary['questions_asked']}, Answers: {summary['questions_answered']}")
         await safe_send_json({"type": "END", "summary": summary})
         end_sent = True
         socket_open = False
@@ -395,10 +613,11 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         await asyncio.sleep(0.5)
         await ws.close()
 
-    # Send initial timer
+    # Send initial timer 
     await safe_send_json({
         "type": "TIMER_INIT",
-        "total_seconds": session.SESSION_LIMIT_SECONDS
+        "main_time_seconds": session.SESSION_LIMIT_SECONDS,
+        "buffer_time_seconds": session.GRACE_PERIOD_SECONDS
     })
 
     audio_buffer = bytearray()
@@ -407,11 +626,25 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         if session.completed or not socket_open:
             return
 
-        remaining = session.get_remaining_time()
+        # Calculate effective elapsed time (subtracting TTS pauses)
+        elapsed = session.get_effective_elapsed_time()
+        
+        # Determine which phase we're in
+        if elapsed < session.SESSION_LIMIT_SECONDS:
+            # PHASE 1: Main time (0 to 45 minutes)
+            remaining = int(session.SESSION_LIMIT_SECONDS - elapsed)
+            in_buffer = False
+        else:
+            # PHASE 2: Buffer time (45 to 47 minutes)
+            buffer_elapsed = elapsed - session.SESSION_LIMIT_SECONDS
+            remaining = int(session.GRACE_PERIOD_SECONDS - buffer_elapsed)
+            remaining = max(remaining, 0)  # Don't go negative
+            in_buffer = True
 
         await safe_send_json({
             "type": "TIMER_UPDATE",
-            "remaining_seconds": remaining
+            "remaining_seconds": remaining,
+            "in_buffer_time": in_buffer
         })
 
         await safe_send_json({
@@ -428,11 +661,42 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
 
     # Background time monitor
     async def monitor_time_limit():
+        nonlocal buffer_warning_sent
+        
         while socket_open and not session.completed:
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)  # Check every second for accuracy
             
-            if session._time_exceeded():
-                print(f"[SESSION {session_id}] Time exceeded - ending interview")
+            # Use EFFECTIVE elapsed time
+            elapsed = session.get_effective_elapsed_time()
+            
+            # Send periodic timer updates to keep frontend synced
+            if elapsed < session.SESSION_LIMIT_SECONDS:
+                remaining = int(session.SESSION_LIMIT_SECONDS - elapsed)
+                in_buffer = False
+            else:
+                buffer_elapsed = elapsed - session.SESSION_LIMIT_SECONDS
+                remaining = int(session.GRACE_PERIOD_SECONDS - buffer_elapsed)
+                in_buffer = True
+            
+            await safe_send_json({
+                "type": "TIMER_UPDATE",
+                "remaining_seconds": max(0, remaining),
+                "in_buffer_time": in_buffer
+            })
+            
+            # Check if we just crossed into buffer time
+            if elapsed >= session.SESSION_LIMIT_SECONDS and not buffer_warning_sent:
+                print(f"[SESSION {session_id}] Main time expired, entering buffer time")
+                await safe_send_json({
+                    "type": "BUFFER_TIME_WARNING",
+                    "message": "⚠️ Main time expired! You have 2 minutes buffer time remaining."
+                })
+                buffer_warning_sent = True
+            
+            # Check if buffer time completely exceeded
+            if elapsed >= (session.SESSION_LIMIT_SECONDS + session.GRACE_PERIOD_SECONDS):
+                print(f"[SESSION {session_id}] Buffer time expired - force ending interview")
+                print(f"[SESSION {session_id}] Effective elapsed: {elapsed:.2f}s")
                 await send_end_and_close()
                 break
 
@@ -460,48 +724,62 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 audio_buffer.extend(msg["bytes"])
                 continue
 
-            # Handle TEXT
+            # Handle TEXT messages (JSON)
             if msg.get("text"):
-                payload = json.loads(msg["text"])
+                try:
+                    payload = json.loads(msg["text"])
+                    msg_type = payload.get("type")
+                    action = payload.get("action")
 
-                if payload.get("action") == "SUBMIT_ANSWER":
+                    # --- TTS SYNC HANDLERS ---
+                    if msg_type == "TTS_PLAYBACK_START":
+                        session.pause_timer()
+                        continue
                     
-                    # Transcribe
-                    if audio_buffer:
-                        answer_text = transcribe_chunk(bytes(audio_buffer))
-                        audio_buffer.clear()
-                    else:
-                        answer_text = payload.get("text", "").strip() or "No answer provided"
+                    if msg_type == "TTS_PLAYBACK_END":
+                        session.resume_timer()
+                        continue
+                    # -------------------------
 
-                    print(f"[SESSION {session_id}] Answer received: {answer_text[:50]}...")
+                    if action == "SUBMIT_ANSWER":
+                        
+                        # Transcribe
+                        if audio_buffer:
+                            answer_text = transcribe_chunk(bytes(audio_buffer))
+                            audio_buffer.clear()
+                        else:
+                            answer_text = payload.get("text", "").strip() or "No answer provided"
 
-                    # Save answer
-                    session.save_answer(answer_text)
+                        print(f"[SESSION {session_id}] Answer received: {answer_text[:50]}...")
 
-                    # Send transcript
-                    await safe_send_json({
-                        "type": "FINAL_TRANSCRIPT",
-                        "text": answer_text
-                    })
+                        # Save answer
+                        session.save_answer(answer_text)
 
-                    # Check if completed AFTER saving answer
-                    if session.completed:
-                        print(f"[SESSION {session_id}] Interview completed after saving answer")
-                        await send_end_and_close()
-                        break
+                        # Send transcript
+                        await safe_send_json({
+                            "type": "FINAL_TRANSCRIPT",
+                            "text": answer_text
+                        })
 
-                    # Try to get NEXT question
-                    next_q = session.next_question()
-                    
-                    if next_q:
-                        # Send next question
-                        print(f"[SESSION {session_id}] Sending next question")
-                        await send_question(next_q)
-                    else:
-                        # No more questions - end interview
-                        print(f"[SESSION {session_id}] No more questions - ending interview")
-                        await send_end_and_close()
-                        break
+                        # Check if completed AFTER saving
+                        if session.completed:
+                            print(f"[SESSION {session_id}] Interview completed after saving answer")
+                            await send_end_and_close()
+                            break
+
+                        # Try to get NEXT question
+                        next_q = session.next_question()
+                        
+                        if next_q:
+                            print(f"[SESSION {session_id}] Sending next question")
+                            await send_question(next_q)
+                        else:
+                            print(f"[SESSION {session_id}] No more questions - ending interview")
+                            await send_end_and_close()
+                            break
+                            
+                except json.JSONDecodeError:
+                    pass
 
     except WebSocketDisconnect:
         print(f"[SESSION {session_id}] WebSocket disconnected")

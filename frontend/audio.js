@@ -477,19 +477,602 @@
 // submitBtn.addEventListener("click", submitAnswer);
 
 
-// frontend/audio.js
+
+
+// // frontend/audio.js - WITH BUFFER TIME FIX
+
+// /* =======================
+//    TIMER STATE
+// ======================= */
+
+// let warned10Min = false;
+// let warned5Min = false;
+// let bufferWarningShown = false;
+
+// let totalSeconds = 0;
+// let mainTimeSeconds = 0;
+// let bufferTimeSeconds = 0;
+// let remainingSeconds = 0;
+// let timerInterval = null;
+// let isTimerPaused = false;
+// let inBufferTime = false;
+
+// /* =======================
+//    AUDIO / WS STATE
+// ======================= */
+
+// let audioContext = null;
+// let processor = null;
+// let source = null;
+// let stream = null;
+
+// let isRunning = false;
+// let sessionId = null;
+// let silenceTimeout = null;
+// let ws = null;
+
+// let micEnabled = false;
+// let isAISpeaking = false;
+
+// /* =======================
+//    UI ELEMENTS
+// ======================= */
+
+// const resumeInput = document.getElementById("resumeFile");
+// const startBtn = document.getElementById("startBtn");
+// const stopBtn = document.getElementById("stopBtn");
+// const submitBtn = document.getElementById("submitBtn");
+
+// resumeInput.addEventListener("change", () => {
+//     startBtn.disabled = false;
+// });
+
+// /* =======================
+//    LOGGING
+// ======================= */
+
+// function log(message, type = "info") {
+//     const timestamp = new Date().toLocaleTimeString();
+//     const prefix = {
+//         "info": "ℹ️",
+//         "success": "✅",
+//         "error": "❌",
+//         "warning": "⚠️"
+//     }[type] || "ℹ️";
+    
+//     console.log(`[${timestamp}] ${prefix} ${message}`);
+// }
+
+// /* =======================
+//    RESUME UPLOAD
+// ======================= */
+
+// async function uploadResume() {
+//     const file = resumeInput.files[0];
+//     if (!file) {
+//         log("No resume file selected", "error");
+//         return null;
+//     }
+
+//     log(`Uploading resume: ${file.name}`, "info");
+
+//     const formData = new FormData();
+//     formData.append("file", file);
+//     formData.append("job_description", "Python Developer");
+
+//     try {
+//         const res = await fetch("http://localhost:8000/upload_resume", {
+//             method: "POST",
+//             body: formData
+//         });
+
+//         const data = await res.json();
+        
+//         if (!res.ok) {
+//             throw new Error(data.error || await res.text());
+//         }
+        
+//         log(`Resume uploaded. Session: ${data.session_id}`, "success");
+//         return data.session_id;
+
+//     } catch (err) {
+//         log(`Upload failed: ${err.message}`, "error");
+//         alert(`Resume upload failed: ${err.message}`);
+//         return null;
+//     }
+// }
+
+// /* =======================
+//    TIMER HELPERS
+// ======================= */
+
+// function formatTime(seconds) {
+//     if (typeof seconds !== "number" || isNaN(seconds) || seconds < 0) {
+//         return "00:00";
+//     }
+//     const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+//     const s = Math.floor(seconds % 60).toString().padStart(2, "0");
+//     return `${m}:${s}`;
+// }
+
+// function updateTimerUI(seconds, isBuffer = false) {
+//     const timerEl = document.getElementById("timer");
+//     if (!timerEl || typeof seconds !== "number" || isNaN(seconds)) return;
+
+//     // Show different prefix for buffer time
+//     const prefix = isBuffer ? "⏰ BUFFER TIME: " : "⏱️ ";
+//     timerEl.textContent = `${prefix}${formatTime(seconds)}`;
+    
+//     timerEl.classList.remove("green", "yellow", "red");
+
+//     if (isBuffer) {
+//         // Buffer time is always red and pulsing
+//         timerEl.classList.add("red");
+//     } else {
+//         // Normal time colors
+//         if (seconds <= 300) {
+//             timerEl.classList.add("red");
+//             if (!warned5Min) {
+//                 warned5Min = true;
+//                 alert("⏰ 5 minutes remaining!");
+//             }
+//         } else if (seconds <= 600) {
+//             timerEl.classList.add("yellow");
+//             if (!warned10Min) {
+//                 warned10Min = true;
+//                 alert("⏰ 10 minutes remaining!");
+//             }
+//         } else {
+//             timerEl.classList.add("green");
+//         }
+//     }
+// }
+
+// function startLocalCountdown() {
+//     if (timerInterval) return;
+
+//     timerInterval = setInterval(() => {
+//         if (!isRunning || isTimerPaused || remainingSeconds <= 0) return;
+
+//         remainingSeconds--;
+//         updateTimerUI(remainingSeconds, inBufferTime);
+
+//         if (remainingSeconds <= 0) {
+//             stopTimer();
+//         }
+//     }, 1000);
+// }
+
+// function stopTimer() {
+//     clearInterval(timerInterval);
+//     timerInterval = null;
+// }
+
+// function pauseTimer() {
+//     isTimerPaused = true;
+// }
+
+// function resumeTimer() {
+//     isTimerPaused = false;
+// }
+
+// /* =======================
+//    AUDIO HELPERS
+// ======================= */
+
+// function floatTo16BitPCM(float32Array) {
+//     const buffer = new ArrayBuffer(float32Array.length * 2);
+//     const view = new DataView(buffer);
+//     for (let i = 0; i < float32Array.length; i++) {
+//         let s = Math.max(-1, Math.min(1, float32Array[i]));
+//         view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+//     }
+//     return buffer;
+// }
+
+// async function playAudioBytes(arrayBuffer) {
+//     if (!arrayBuffer || !audioContext) return;
+
+//     isAISpeaking = true;
+//     pauseTimer();
+//     muteMic();
+//     submitBtn.disabled = true;
+
+//     try {
+//         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+//         const src = audioContext.createBufferSource();
+//         src.buffer = audioBuffer;
+//         src.connect(audioContext.destination);
+
+//         await new Promise(resolve => {
+//             src.onended = resolve;
+//             src.start(0);
+//         });
+
+//     } catch (e) {
+//         log(`TTS error: ${e.message}`, "error");
+//     } finally {
+//         isAISpeaking = false;
+//         if (isRunning) {
+//             resumeTimer();
+//             unmuteMic();
+//             submitBtn.disabled = false;
+//             resetSilenceTimer();
+//         }
+//     }
+// }
+
+// /* =======================
+//    MIC CONTROL
+// ======================= */
+
+// function muteMic() {
+//     try {
+//         processor?.disconnect();
+//         source?.disconnect();
+//     } catch {}
+//     micEnabled = false;
+// }
+
+// function unmuteMic() {
+//     try {
+//         if (audioContext && processor && source && isRunning) {
+//             source.connect(processor);
+//             processor.connect(audioContext.destination);
+//             micEnabled = true;
+//         }
+//     } catch {}
+// }
+
+// /* =======================
+//    SILENCE TIMER
+// ======================= */
+
+// function resetSilenceTimer() {
+//     clearTimeout(silenceTimeout);
+//     if (isRunning && !isAISpeaking) {
+//         silenceTimeout = setTimeout(() => {
+//             if (isRunning && !isAISpeaking) {
+//                 log("10s silence - auto-submitting", "info");
+//                 submitAnswer();
+//             }
+//         }, 10000);
+//     }
+// }
+
+// /* =======================
+//    SCORE FORMATTING
+// ======================= */
+
+// function getScoreEmoji(score) {
+//     if (score >= 0.75) return "🟢";
+//     if (score >= 0.50) return "🟡";
+//     if (score >= 0.25) return "🟠";
+//     return "🔴";
+// }
+
+// function getScoreGrade(score) {
+//     if (score >= 0.90) return "Excellent";
+//     if (score >= 0.75) return "Good";
+//     if (score >= 0.60) return "Average";
+//     if (score >= 0.40) return "Below Average";
+//     return "Poor";
+// }
+
+// /* =======================
+//    DISPLAY RESULTS
+// ======================= */
+
+// function displayResults(summary) {
+//     const transcript = document.getElementById("transcript");
+//     transcript.textContent = "";
+    
+//     transcript.textContent += "\n";
+//     transcript.textContent += "╔═══════════════════════════════════════════════════════════════════╗\n";
+//     transcript.textContent += "║                     📊 INTERVIEW RESULTS                          ║\n";
+//     transcript.textContent += "╚═══════════════════════════════════════════════════════════════════╝\n";
+//     transcript.textContent += "\n\n";
+    
+//     // QUESTION-WISE SCORES
+//     transcript.textContent += "┌─────────────────────────────────────────────────────────────────┐\n";
+//     transcript.textContent += "│                    QUESTION-WISE SCORES                         │\n";
+//     transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
+    
+//     summary.questions.forEach((question, index) => {
+//         const score = summary.scores[index];
+//         const duration = summary.time_per_answer_seconds ? summary.time_per_answer_seconds[index] : 0;
+        
+//         const emoji = getScoreEmoji(score.final_score);
+//         const grade = getScoreGrade(score.final_score);
+        
+//         transcript.textContent += `${emoji} Question ${index + 1}:\n`;
+//         transcript.textContent += `   ${question}\n`;
+//         transcript.textContent += `   Score: ${score.final_score.toFixed(2)} (${grade}) | Time: ${Math.floor(duration)}s\n\n`;
+//     });
+    
+//     // OVERALL SUMMARY
+//     transcript.textContent += "\n┌─────────────────────────────────────────────────────────────────┐\n";
+//     transcript.textContent += "│                      OVERALL SUMMARY                            │\n";
+//     transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
+    
+//     const resultIcon = summary.result === 'PASS' ? '✅' : '❌';
+//     const resultText = summary.result === 'PASS' ? 'PASS' : 'FAIL';
+    
+//     transcript.textContent += `${resultIcon} Final Result:       ${resultText}\n`;
+//     transcript.textContent += `📈 Average Score:      ${summary.average_score.toFixed(2)} / 1.00\n`;
+//     transcript.textContent += `📝 Questions Answered: ${summary.questions_answered} / ${summary.questions_asked}\n`;
+//     transcript.textContent += `⏱️  Total Duration:     ${Math.floor(summary.total_duration_seconds / 60)}m ${Math.floor(summary.total_duration_seconds % 60)}s\n`;
+//     transcript.textContent += `🏁 Completion:         ${summary.completion_reason.replace(/_/g, ' ')}\n`;
+    
+//     if (summary.covered_projects && summary.covered_projects.length > 0) {
+//         transcript.textContent += `💼 Projects Covered:   ${summary.covered_projects.join(', ')}\n`;
+//     }
+    
+//     // FEEDBACK
+//     transcript.textContent += "\n\n┌─────────────────────────────────────────────────────────────────┐\n";
+//     transcript.textContent += "│                         FEEDBACK                                │\n";
+//     transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
+    
+//     if (summary.feedback && summary.feedback.trim()) {
+//         transcript.textContent += summary.feedback + "\n";
+//     } else {
+//         transcript.textContent += "⏳ Generating feedback...\n";
+//     }
+    
+//     transcript.textContent += "\n\n";
+//     transcript.textContent += "╔═══════════════════════════════════════════════════════════════════╗\n";
+//     transcript.textContent += "║          Thank you for completing the interview! 🎉              ║\n";
+//     transcript.textContent += "╚═══════════════════════════════════════════════════════════════════╝\n";
+    
+//     transcript.scrollTop = 0;
+// }
+
+// /* =======================
+//    START INTERVIEW
+// ======================= */
+
+// async function startInterview() {
+//     if (isRunning) {
+//         log("Already running", "warning");
+//         return;
+//     }
+
+//     log("Starting interview...", "info");
+//     isRunning = true;
+//     warned10Min = false;
+//     warned5Min = false;
+//     bufferWarningShown = false;
+//     inBufferTime = false;
+
+//     sessionId = await uploadResume();
+//     if (!sessionId) {
+//         isRunning = false;
+//         return;
+//     }
+
+//     const transcript = document.getElementById("transcript");
+//     transcript.textContent = "Interview starting...\n";
+
+//     const wsUrl = `ws://localhost:8000/ws/interview?session_id=${sessionId}`;
+//     log(`Connecting to WebSocket`, "info");
+
+//     ws = new WebSocket(wsUrl);
+//     ws.binaryType = "arraybuffer";
+
+//     ws.onopen = () => {
+//         log("WebSocket connected", "success");
+//         transcript.textContent += "✅ Connected\n";
+//     };
+
+//     ws.onmessage = async (event) => {
+//         if (typeof event.data === "string") {
+//             const data = JSON.parse(event.data);
+//             log(`Message: ${data.type}`, "info");
+
+//             switch (data.type) {
+//                 case "TIMER_INIT":
+//                     mainTimeSeconds = data.main_time_seconds;
+//                     bufferTimeSeconds = data.buffer_time_seconds;
+//                     // Start with ONLY main time (45 minutes)
+//                     remainingSeconds = mainTimeSeconds;
+//                     updateTimerUI(remainingSeconds, false);
+//                     startLocalCountdown();
+//                     log(`Timer started: ${mainTimeSeconds}s main + ${bufferTimeSeconds}s buffer`, "success");
+//                     break;
+
+//                 case "TIMER_UPDATE":
+//                     const newRemaining = data.remaining_seconds;
+//                     const nowInBuffer = data.in_buffer_time || false;
+                    
+//                     // Check if we just entered buffer time
+//                     if (nowInBuffer && !inBufferTime) {
+//                         // Transition to buffer time
+//                         inBufferTime = true;
+//                         remainingSeconds = bufferTimeSeconds;
+//                         updateTimerUI(remainingSeconds, true);
+                        
+//                         if (!bufferWarningShown) {
+//                             bufferWarningShown = true;
+//                             alert("⚠️ Main time expired! You have 2 minutes buffer time remaining.");
+//                             log("Entered buffer time", "warning");
+//                         }
+//                     } else {
+//                         remainingSeconds = newRemaining;
+//                         updateTimerUI(remainingSeconds, inBufferTime);
+//                     }
+//                     break;
+
+//                 case "BUFFER_TIME_WARNING":
+//                     if (!bufferWarningShown && !inBufferTime) {
+//                         inBufferTime = true;
+//                         remainingSeconds = bufferTimeSeconds;
+//                         bufferWarningShown = true;
+//                         alert(data.message);
+//                         updateTimerUI(remainingSeconds, true);
+//                         log("Entered buffer time", "warning");
+//                     }
+//                     break;
+
+//                 case "QUESTION":
+//                     transcript.textContent += `\n❓ ${data.text}\n`;
+//                     transcript.scrollTop = transcript.scrollHeight;
+//                     resetSilenceTimer();
+//                     break;
+
+//                 case "FINAL_TRANSCRIPT":
+//                     transcript.textContent += `\nYou: ${data.text}\n`;
+//                     transcript.scrollTop = transcript.scrollHeight;
+//                     break;
+
+//                 case "END":
+//                     log("Interview ended", "success");
+//                     displayResults(data.summary);
+//                     stopInterview(false);
+//                     break;
+
+//                 case "ERROR":
+//                     log(`Error: ${data.text}`, "error");
+//                     alert(`Error: ${data.text}`);
+//                     stopInterview(false);
+//                     break;
+
+//                 case "TTS_START":
+//                 case "TTS_END":
+//                     break;
+//             }
+//         } else {
+//             await playAudioBytes(event.data);
+//         }
+//     };
+
+//     ws.onerror = (error) => {
+//         log(`WebSocket error`, "error");
+//         console.error(error);
+//         alert("Connection error. Check backend server.");
+//         stopInterview(false);
+//     };
+
+//     ws.onclose = (event) => {
+//         log(`WebSocket closed: ${event.code}`, "warning");
+//         if (isRunning) {
+//             stopInterview(false);
+//         }
+//     };
+
+//     try {
+//         log("Requesting microphone...", "info");
+//         audioContext = new AudioContext({ sampleRate: 16000 });
+//         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+//         log("Microphone granted", "success");
+
+//         source = audioContext.createMediaStreamSource(stream);
+//         processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+//         processor.onaudioprocess = (e) => {
+//             if (!isRunning || !micEnabled || isAISpeaking) return;
+//             if (ws?.readyState === WebSocket.OPEN) {
+//                 ws.send(floatTo16BitPCM(e.inputBuffer.getChannelData(0)));
+//                 resetSilenceTimer();
+//             }
+//         };
+
+//         unmuteMic();
+//         log("Audio processing started", "success");
+
+//         stopBtn.disabled = false;
+//         submitBtn.disabled = false;
+
+//     } catch (err) {
+//         log(`Microphone failed: ${err.message}`, "error");
+//         alert(`Microphone access denied: ${err.message}`);
+//         stopInterview(false);
+//     }
+// }
+
+// /* =======================
+//    STOP INTERVIEW
+// ======================= */
+
+// function stopInterview(reset = true) {
+//     log("Stopping...", "info");
+    
+//     isRunning = false;
+//     pauseTimer();
+//     stopTimer();
+//     clearTimeout(silenceTimeout);
+
+//     try {
+//         muteMic();
+//         processor?.disconnect();
+//         source?.disconnect();
+//         audioContext?.close();
+//         stream?.getTracks().forEach(t => t.stop());
+//         ws?.close();
+//         log("Stopped", "success");
+//     } catch (e) {
+//         log(`Cleanup error: ${e.message}`, "error");
+//     }
+
+//     if (reset) {
+//         startBtn.disabled = false;
+//         stopBtn.disabled = true;
+//         submitBtn.disabled = true;
+//     }
+// }
+
+// /* =======================
+//    SUBMIT ANSWER
+// ======================= */
+
+// function submitAnswer() {
+//     if (ws?.readyState === WebSocket.OPEN && isRunning) {
+//         log("Submitting answer", "info");
+//         ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
+//         clearTimeout(silenceTimeout);
+//     } else {
+//         log(`Cannot submit: WS=${ws?.readyState}`, "warning");
+//     }
+// }
+
+// /* =======================
+//    EVENTS
+// ======================= */
+
+// startBtn.addEventListener("click", async () => {
+//     startBtn.disabled = true;
+//     await startInterview();
+// });
+
+// stopBtn.addEventListener("click", () => {
+//     stopInterview(true);
+// });
+
+// submitBtn.addEventListener("click", submitAnswer);
+
+// log("Loaded successfully", "success");
+
+
+
+
+
+
+// frontend/audio.js - WITH BUFFER TIME FIX AND SYNC
 
 /* =======================
-TIMER STATE
+   TIMER STATE
 ======================= */
 
 let warned10Min = false;
 let warned5Min = false;
+let bufferWarningShown = false;
 
 let totalSeconds = 0;
+let mainTimeSeconds = 0;
+let bufferTimeSeconds = 0;
 let remainingSeconds = 0;
 let timerInterval = null;
 let isTimerPaused = false;
+let inBufferTime = false;
 
 /* =======================
    AUDIO / WS STATE
@@ -505,7 +1088,6 @@ let sessionId = null;
 let silenceTimeout = null;
 let ws = null;
 
-// Mic + TTS state
 let micEnabled = false;
 let isAISpeaking = false;
 
@@ -523,7 +1105,7 @@ resumeInput.addEventListener("change", () => {
 });
 
 /* =======================
-   LOGGING HELPER
+   LOGGING
 ======================= */
 
 function log(message, type = "info") {
@@ -567,11 +1149,11 @@ async function uploadResume() {
             throw new Error(data.error || await res.text());
         }
         
-        log(`Resume uploaded successfully. Session ID: ${data.session_id}`, "success");
+        log(`Resume uploaded. Session: ${data.session_id}`, "success");
         return data.session_id;
 
     } catch (err) {
-        log(`Resume upload failed: ${err.message}`, "error");
+        log(`Upload failed: ${err.message}`, "error");
         alert(`Resume upload failed: ${err.message}`);
         return null;
     }
@@ -590,27 +1172,36 @@ function formatTime(seconds) {
     return `${m}:${s}`;
 }
 
-function updateTimerUI(seconds) {
+function updateTimerUI(seconds, isBuffer = false) {
     const timerEl = document.getElementById("timer");
     if (!timerEl || typeof seconds !== "number" || isNaN(seconds)) return;
 
-    timerEl.textContent = `⏱️ ${formatTime(seconds)}`;
+    // Show different prefix for buffer time
+    const prefix = isBuffer ? "⏰ BUFFER TIME: " : "⏱️ ";
+    timerEl.textContent = `${prefix}${formatTime(seconds)}`;
+    
     timerEl.classList.remove("green", "yellow", "red");
 
-    if (seconds <= 300) {
+    if (isBuffer) {
+        // Buffer time is always red and pulsing
         timerEl.classList.add("red");
-        if (!warned5Min) {
-            warned5Min = true;
-            alert("⏰ 5 minutes remaining. Please wrap up your answers.");
-        }
-    } else if (seconds <= 600) {
-        timerEl.classList.add("yellow");
-        if (!warned10Min) {
-            warned10Min = true;
-            alert("⏰ 10 minutes remaining. Please manage your time wisely.");
-        }
     } else {
-        timerEl.classList.add("green");
+        // Normal time colors
+        if (seconds <= 300) {
+            timerEl.classList.add("red");
+            if (!warned5Min) {
+                warned5Min = true;
+                alert("⏰ 5 minutes remaining!");
+            }
+        } else if (seconds <= 600) {
+            timerEl.classList.add("yellow");
+            if (!warned10Min) {
+                warned10Min = true;
+                alert("⏰ 10 minutes remaining!");
+            }
+        } else {
+            timerEl.classList.add("green");
+        }
     }
 }
 
@@ -621,7 +1212,7 @@ function startLocalCountdown() {
         if (!isRunning || isTimerPaused || remainingSeconds <= 0) return;
 
         remainingSeconds--;
-        updateTimerUI(remainingSeconds);
+        updateTimerUI(remainingSeconds, inBufferTime);
 
         if (remainingSeconds <= 0) {
             stopTimer();
@@ -660,9 +1251,14 @@ async function playAudioBytes(arrayBuffer) {
     if (!arrayBuffer || !audioContext) return;
 
     isAISpeaking = true;
-    pauseTimer();
+    pauseTimer(); // Local pause
     muteMic();
     submitBtn.disabled = true;
+
+    // NOTIFY BACKEND TO PAUSE TIMER
+    if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "TTS_PLAYBACK_START" }));
+    }
 
     try {
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -676,11 +1272,17 @@ async function playAudioBytes(arrayBuffer) {
         });
 
     } catch (e) {
-        log(`TTS playback error: ${e.message}`, "error");
+        log(`TTS error: ${e.message}`, "error");
     } finally {
         isAISpeaking = false;
+        
+        // NOTIFY BACKEND TO RESUME TIMER
+        if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "TTS_PLAYBACK_END" }));
+        }
+
         if (isRunning) {
-            resumeTimer();
+            resumeTimer(); // Local resume
             unmuteMic();
             submitBtn.disabled = false;
             resetSilenceTimer();
@@ -719,7 +1321,7 @@ function resetSilenceTimer() {
     if (isRunning && !isAISpeaking) {
         silenceTimeout = setTimeout(() => {
             if (isRunning && !isAISpeaking) {
-                log("10 seconds of silence detected - auto-submitting answer", "info");
+                log("10s silence - auto-submitting", "info");
                 submitAnswer();
             }
         }, 10000);
@@ -751,13 +1353,18 @@ function getScoreGrade(score) {
 
 function displayResults(summary) {
     const transcript = document.getElementById("transcript");
+    transcript.textContent = "";
     
-    transcript.textContent += "\n\n" + "=".repeat(70) + "\n";
-    transcript.textContent += "                    📊 INTERVIEW RESULTS\n";
-    transcript.textContent += "=".repeat(70) + "\n\n";
+    transcript.textContent += "\n";
+    transcript.textContent += "╔═══════════════════════════════════════════════════════════════════╗\n";
+    transcript.textContent += "║                     📊 INTERVIEW RESULTS                          ║\n";
+    transcript.textContent += "╚═══════════════════════════════════════════════════════════════════╝\n";
+    transcript.textContent += "\n\n";
     
-    // SECTION 1: QUESTION-WISE SCORES
-    transcript.textContent += "━━━━━━━━━━━━━━━━━━━ QUESTION-WISE SCORES ━━━━━━━━━━━━━━━━━━\n\n";
+    // QUESTION-WISE SCORES
+    transcript.textContent += "┌─────────────────────────────────────────────────────────────────┐\n";
+    transcript.textContent += "│                    QUESTION-WISE SCORES                         │\n";
+    transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
     
     summary.questions.forEach((question, index) => {
         const score = summary.scores[index];
@@ -766,38 +1373,46 @@ function displayResults(summary) {
         const emoji = getScoreEmoji(score.final_score);
         const grade = getScoreGrade(score.final_score);
         
-        transcript.textContent += `Q${index + 1}. ${question}\n`;
-        transcript.textContent += `    ${emoji} Score: ${score.final_score.toFixed(2)} (${grade}) | Time: ${Math.floor(duration)}s\n\n`;
+        transcript.textContent += `${emoji} Question ${index + 1}:\n`;
+        transcript.textContent += `   ${question}\n`;
+        transcript.textContent += `   Score: ${score.final_score.toFixed(2)} (${grade}) | Time: ${Math.floor(duration)}s\n\n`;
     });
     
-    // SECTION 2: OVERALL SUMMARY
-    transcript.textContent += "\n━━━━━━━━━━━━ OVERALL SUMMARY ━━━━━━━━━━━━━━\n\n";
-
-    transcript.textContent += `Final Result:        ${summary.result === 'PASS' ? '✅ PASS' : '❌ FAIL'}\n`;
-    transcript.textContent += `Average Score:       ${summary.average_score.toFixed(2)} / 1.00\n`;
-    transcript.textContent += `Total Questions:     ${summary.questions.length}\n`;
-    transcript.textContent += `Total Duration:      ${Math.floor(summary.total_duration_seconds / 60)}m ${Math.floor(summary.total_duration_seconds % 60)}s\n`;
-    transcript.textContent += `Completion Reason:   ${summary.completion_reason.replace(/_/g, ' ')}\n`;
+    // OVERALL SUMMARY
+    transcript.textContent += "\n┌─────────────────────────────────────────────────────────────────┐\n";
+    transcript.textContent += "│                      OVERALL SUMMARY                            │\n";
+    transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
+    
+    const resultIcon = summary.result === 'PASS' ? '✅' : '❌';
+    const resultText = summary.result === 'PASS' ? 'PASS' : 'FAIL';
+    
+    transcript.textContent += `${resultIcon} Final Result:       ${resultText}\n`;
+    transcript.textContent += `📈 Average Score:      ${summary.average_score.toFixed(2)} / 1.00\n`;
+    transcript.textContent += `📝 Questions Answered: ${summary.questions_answered} / ${summary.questions_asked}\n`;
+    transcript.textContent += `⏱️  Total Duration:     ${Math.floor(summary.total_duration_seconds / 60)}m ${Math.floor(summary.total_duration_seconds % 60)}s\n`;
+    transcript.textContent += `🏁 Completion:         ${summary.completion_reason.replace(/_/g, ' ')}\n`;
     
     if (summary.covered_projects && summary.covered_projects.length > 0) {
-        transcript.textContent += `Projects Discussed:  ${summary.covered_projects.join(', ')}\n`;
+        transcript.textContent += `💼 Projects Covered:   ${summary.covered_projects.join(', ')}\n`;
     }
     
-    // SECTION 3: DETAILED FEEDBACK
+    // FEEDBACK
+    transcript.textContent += "\n\n┌─────────────────────────────────────────────────────────────────┐\n";
+    transcript.textContent += "│                         FEEDBACK                                │\n";
+    transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
+    
     if (summary.feedback && summary.feedback.trim()) {
-        transcript.textContent += "\n━━━━━━━━━━━━━━━━━━━━━━ FEEDBACK ━━━━━━━━━━━━━━━━━━━━━━━\n\n";
         transcript.textContent += summary.feedback + "\n";
     } else {
-        transcript.textContent += "\n━━━━━━━━━━━━━━━━━━━━━━ FEEDBACK ━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-        transcript.textContent += "Feedback generation in progress...\n";
+        transcript.textContent += "⏳ Generating feedback...\n";
     }
     
-    transcript.textContent += "\n" + "=".repeat(70) + "\n";
-    transcript.textContent += "           Thank you for completing the interview!\n";
-    transcript.textContent += "=".repeat(70) + "\n\n";
+    transcript.textContent += "\n\n";
+    transcript.textContent += "╔═══════════════════════════════════════════════════════════════════╗\n";
+    transcript.textContent += "║          Thank you for completing the interview! 🎉              ║\n";
+    transcript.textContent += "╚═══════════════════════════════════════════════════════════════════╝\n";
     
-    // Scroll to bottom
-    transcript.scrollTop = transcript.scrollHeight;
+    transcript.scrollTop = 0;
 }
 
 /* =======================
@@ -806,7 +1421,7 @@ function displayResults(summary) {
 
 async function startInterview() {
     if (isRunning) {
-        log("Interview already running", "warning");
+        log("Already running", "warning");
         return;
     }
 
@@ -814,6 +1429,8 @@ async function startInterview() {
     isRunning = true;
     warned10Min = false;
     warned5Min = false;
+    bufferWarningShown = false;
+    inBufferTime = false;
 
     sessionId = await uploadResume();
     if (!sessionId) {
@@ -825,93 +1442,119 @@ async function startInterview() {
     transcript.textContent = "Interview starting...\n";
 
     const wsUrl = `ws://localhost:8000/ws/interview?session_id=${sessionId}`;
-    log(`Connecting to WebSocket: ${wsUrl}`, "info");
+    log(`Connecting to WebSocket`, "info");
 
     ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-        log("WebSocket connection established", "success");
-        transcript.textContent += "✅ Connected to interview server\n";
+        log("WebSocket connected", "success");
+        transcript.textContent += "✅ Connected\n";
     };
 
     ws.onmessage = async (event) => {
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
-            log(`Received message type: ${data.type}`, "info");
+            
+            // Don't log TIMER_UPDATE constantly to keep console clean
+            if(data.type !== "TIMER_UPDATE") {
+                log(`Message: ${data.type}`, "info");
+            }
 
             switch (data.type) {
                 case "TIMER_INIT":
-                    totalSeconds = data.total_seconds;
-                    remainingSeconds = totalSeconds;
-                    updateTimerUI(remainingSeconds);
+                    mainTimeSeconds = data.main_time_seconds;
+                    bufferTimeSeconds = data.buffer_time_seconds;
+                    // Start with ONLY main time (45 minutes)
+                    remainingSeconds = mainTimeSeconds;
+                    updateTimerUI(remainingSeconds, false);
                     startLocalCountdown();
-                    log(`Timer initialized: ${totalSeconds} seconds`, "success");
+                    log(`Timer started: ${mainTimeSeconds}s main + ${bufferTimeSeconds}s buffer`, "success");
                     break;
 
                 case "TIMER_UPDATE":
-                    remainingSeconds = data.remaining_seconds;
-                    updateTimerUI(remainingSeconds);
+                    const newRemaining = data.remaining_seconds;
+                    const nowInBuffer = data.in_buffer_time || false;
+                    
+                    // Sync the timer to backend
+                    remainingSeconds = newRemaining;
+
+                    // Check if we transitioned to buffer time
+                    if (nowInBuffer && !inBufferTime) {
+                        inBufferTime = true;
+                        
+                        if (!bufferWarningShown) {
+                            bufferWarningShown = true;
+                            alert("⚠️ Main time expired! You have 2 minutes buffer time remaining.");
+                            log("Entered buffer time", "warning");
+                        }
+                    }
+                    
+                    updateTimerUI(remainingSeconds, inBufferTime);
+                    break;
+
+                case "BUFFER_TIME_WARNING":
+                    if (!bufferWarningShown && !inBufferTime) {
+                        inBufferTime = true;
+                        remainingSeconds = bufferTimeSeconds;
+                        bufferWarningShown = true;
+                        alert(data.message);
+                        updateTimerUI(remainingSeconds, true);
+                        log("Entered buffer time", "warning");
+                    }
                     break;
 
                 case "QUESTION":
                     transcript.textContent += `\n❓ ${data.text}\n`;
                     transcript.scrollTop = transcript.scrollHeight;
                     resetSilenceTimer();
-                    log(`Question received`, "info");
                     break;
 
                 case "FINAL_TRANSCRIPT":
                     transcript.textContent += `\nYou: ${data.text}\n`;
                     transcript.scrollTop = transcript.scrollHeight;
-                    log(`Answer transcribed`, "success");
                     break;
 
                 case "END":
-                    log("Interview ended - displaying results", "success");
+                    log("Interview ended", "success");
                     displayResults(data.summary);
                     stopInterview(false);
                     break;
 
                 case "ERROR":
-                    log(`Server error: ${data.text}`, "error");
+                    log(`Error: ${data.text}`, "error");
                     alert(`Error: ${data.text}`);
                     stopInterview(false);
                     break;
 
                 case "TTS_START":
-                    log("TTS playback starting", "info");
-                    break;
-
                 case "TTS_END":
-                    log("TTS playback ended", "success");
                     break;
             }
         } else {
-            log(`Received audio data: ${event.data.byteLength} bytes`, "info");
             await playAudioBytes(event.data);
         }
     };
 
     ws.onerror = (error) => {
         log(`WebSocket error`, "error");
-        console.error("WebSocket error details:", error);
-        alert("WebSocket connection error. Please check backend server.");
+        console.error(error);
+        alert("Connection error. Check backend server.");
         stopInterview(false);
     };
 
     ws.onclose = (event) => {
-        log(`WebSocket closed. Code: ${event.code}`, "warning");
+        log(`WebSocket closed: ${event.code}`, "warning");
         if (isRunning) {
             stopInterview(false);
         }
     };
 
     try {
-        log("Requesting microphone access...", "info");
+        log("Requesting microphone...", "info");
         audioContext = new AudioContext({ sampleRate: 16000 });
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        log("Microphone access granted", "success");
+        log("Microphone granted", "success");
 
         source = audioContext.createMediaStreamSource(stream);
         processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -931,7 +1574,7 @@ async function startInterview() {
         submitBtn.disabled = false;
 
     } catch (err) {
-        log(`Microphone access failed: ${err.message}`, "error");
+        log(`Microphone failed: ${err.message}`, "error");
         alert(`Microphone access denied: ${err.message}`);
         stopInterview(false);
     }
@@ -942,7 +1585,7 @@ async function startInterview() {
 ======================= */
 
 function stopInterview(reset = true) {
-    log("Stopping interview...", "info");
+    log("Stopping...", "info");
     
     isRunning = false;
     pauseTimer();
@@ -956,9 +1599,9 @@ function stopInterview(reset = true) {
         audioContext?.close();
         stream?.getTracks().forEach(t => t.stop());
         ws?.close();
-        log("Interview stopped successfully", "success");
+        log("Stopped", "success");
     } catch (e) {
-        log(`Error during cleanup: ${e.message}`, "error");
+        log(`Cleanup error: ${e.message}`, "error");
     }
 
     if (reset) {
@@ -974,11 +1617,11 @@ function stopInterview(reset = true) {
 
 function submitAnswer() {
     if (ws?.readyState === WebSocket.OPEN && isRunning) {
-        log("Submitting answer...", "info");
+        log("Submitting answer", "info");
         ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
         clearTimeout(silenceTimeout);
     } else {
-        log(`Cannot submit: WebSocket state = ${ws?.readyState}`, "warning");
+        log(`Cannot submit: WS=${ws?.readyState}`, "warning");
     }
 }
 
@@ -997,4 +1640,4 @@ stopBtn.addEventListener("click", () => {
 
 submitBtn.addEventListener("click", submitAnswer);
 
-log("audio.js loaded successfully", "success");
+log("Loaded successfully", "success");
