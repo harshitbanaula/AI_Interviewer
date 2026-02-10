@@ -1,60 +1,4 @@
-
-<!-- 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>AI Interviewer – Live Transcript & Feedback</title>
-  <style>
-    body { font-family: "Segoe UI", sans-serif; background: #f0f4f8; min-height: 100vh; margin: 0; padding: 40px 20px; display: flex; justify-content: center; align-items: flex-start; color: #1f2937; }
-    .container { width: 100%; max-width: 700px; background: white; border-radius: 12px; padding: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-    h2 { text-align: center; margin-bottom: 20px; color: #111827; }
-    .buttons { display: flex; justify-content: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
-    button { padding: 12px 24px; font-size: 16px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; transition: background 0.2s ease; }
-    #startBtn { background-color: #4f46e5; color: white; } #startBtn:hover { background-color: #4338ca; }
-    #stopBtn { background-color: #ef4444; color: white; } #stopBtn:hover { background-color: #b91c1c; } #stopBtn:disabled { opacity: 0.5; cursor: not-allowed; }
-    input[type="file"] { margin-bottom: 15px; }
-    .transcript-box, .feedback-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 15px; min-height: 180px; font-size: 16px; line-height: 1.6; white-space: pre-wrap; overflow-y: auto; margin-bottom: 20px; }
-    .hint { text-align: center; margin-top: 10px; font-size: 14px; color: #6b7280; }
-    .feedback-title { font-weight: 600; margin-bottom: 10px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h2> AI Interviewer – Upload Resume & Start Interview</h2>
-
-    <input type="file" id="resumeFile" accept=".pdf,.docx,.txt" />
-    <p id="uploadStatus" class="hint"></p>
-
-    <div class="buttons">
-      <button id="startBtn" disabled>Start Interview</button>
-      <button id="stopBtn" disabled>Stop</button>
-    </div>
-
-    <div id="transcript" class="transcript-box">
-      Your live transcript will appear here...
-    </div>
-
-    <div class="feedback-title"> Feedback:</div>
-    <div id="feedback" class="feedback-box">
-      Feedback will appear here after the interview.
-    </div>
-
-    <div class="hint">
-      Upload your resume, click <b>Start Interview</b>, speak clearly, and see text appear live.
-    </div>
-  </div>
-
-  <script src="audio.js"></script>
-</body>
-</html> 
-
- -->
-
-
-<!-- frontend/index.html -->
-
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -100,7 +44,7 @@
 </head>
 <body>
   <div id="timer" class="timer green">
-  ⏱️ 2:00
+  ⏱️ 45:00
   </div>
   <div class="container">
     <h2> AI Interviewer – Upload Resume & Start Interview</h2>
@@ -132,4 +76,133 @@
 
 
 
-  
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Interviewer – Live Transcript & Feedback</title>
+  <style>
+    /* Interview Timer */
+    .timer {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #111827;
+  color: #10b981;
+  padding: 14px 22px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 1px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+  z-index: 9999;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+
+    .timer.green { background: #064e3b; color: #34d399; }
+    .timer.yellow { background: #78350f; color: #facc15; }
+    .timer.red { background: #7f1d1d; color: #fca5a5; }
+
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #f0f4f8;
+      min-height: 100vh;
+      margin: 0;
+      padding: 40px 20px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      color: #1f2937;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 700px;
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    }
+
+    h2 { text-align: center; margin-bottom: 20px; color: #111827; }
+    .buttons { display: flex; justify-content: center; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    #startBtn { background-color: #4f46e5; color: white; }
+    #startBtn:hover { background-color: #4338ca; }
+
+    #stopBtn { background-color: #ef4444; color: white; }
+    #stopBtn:hover { background-color: #b91c1c; }
+    #stopBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #submitBtn { background-color: #10b981; color: white; }
+    #submitBtn:hover { background-color: #059669; }
+    #submitBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    input[type="file"] { margin-bottom: 15px; }
+
+    .transcript-box, .feedback-box {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 15px;
+      min-height: 180px;
+      font-size: 16px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+
+    .hint { text-align: center; margin-top: 10px; font-size: 14px; color: #6b7280; }
+    .feedback-title { font-weight: 600; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+  <div id="timer" class="timer green">
+    ⏱️ 45:00
+  </div>
+
+  <div class="container">
+    <h2> AI Interviewer – Upload Resume & Start Interview</h2>
+
+    <input type="file" id="resumeFile" accept=".pdf,.docx,.txt" />
+
+    <div class="buttons">
+      <button id="startBtn" disabled>Start Interview</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <button id="submitBtn" disabled>Submit Answer</button>
+    </div>
+
+    <div id="transcript" class="transcript-box">
+      Your Interview Questions and Live Transcript will appear here...
+    </div>
+
+    <div class="feedback-title"> Feedback:</div>
+    <div id="feedback" class="feedback-box">
+      Feedback will appear here after the interview.
+    </div>
+
+    <div class="hint">
+      Upload your resume, click <b>Start Interview</b>, speak clearly, and see text appear live. Answers auto-submit after 10s silence.
+    </div>
+  </div>
+
+  <script src="audio.js"></script>
+</body>
+</html>
+

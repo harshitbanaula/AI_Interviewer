@@ -1058,9 +1058,9 @@
 
 // frontend/audio.js - WITH BUFFER TIME FIX AND SYNC
 
-/* =======================
-   TIMER STATE
-======================= */
+
+//    TIMER STATE
+
 
 let warned10Min = false;
 let warned5Min = false;
@@ -1074,9 +1074,8 @@ let timerInterval = null;
 let isTimerPaused = false;
 let inBufferTime = false;
 
-/* =======================
-   AUDIO / WS STATE
-======================= */
+//    AUDIO / WS STATE
+
 
 let audioContext = null;
 let processor = null;
@@ -1091,9 +1090,8 @@ let ws = null;
 let micEnabled = false;
 let isAISpeaking = false;
 
-/* =======================
-   UI ELEMENTS
-======================= */
+
+//    UI ELEMENTS
 
 const resumeInput = document.getElementById("resumeFile");
 const startBtn = document.getElementById("startBtn");
@@ -1104,9 +1102,8 @@ resumeInput.addEventListener("change", () => {
     startBtn.disabled = false;
 });
 
-/* =======================
-   LOGGING
-======================= */
+//    LOGGING
+
 
 function log(message, type = "info") {
     const timestamp = new Date().toLocaleTimeString();
@@ -1120,9 +1117,7 @@ function log(message, type = "info") {
     console.log(`[${timestamp}] ${prefix} ${message}`);
 }
 
-/* =======================
-   RESUME UPLOAD
-======================= */
+//    RESUME UPLOAD
 
 async function uploadResume() {
     const file = resumeInput.files[0];
@@ -1159,9 +1154,7 @@ async function uploadResume() {
     }
 }
 
-/* =======================
-   TIMER HELPERS
-======================= */
+//    TIMER HELPERS
 
 function formatTime(seconds) {
     if (typeof seconds !== "number" || isNaN(seconds) || seconds < 0) {
@@ -1233,9 +1226,7 @@ function resumeTimer() {
     isTimerPaused = false;
 }
 
-/* =======================
-   AUDIO HELPERS
-======================= */
+//    AUDIO HELPERS
 
 function floatTo16BitPCM(float32Array) {
     const buffer = new ArrayBuffer(float32Array.length * 2);
@@ -1290,9 +1281,7 @@ async function playAudioBytes(arrayBuffer) {
     }
 }
 
-/* =======================
-   MIC CONTROL
-======================= */
+//    MIC CONTROL
 
 function muteMic() {
     try {
@@ -1312,9 +1301,8 @@ function unmuteMic() {
     } catch {}
 }
 
-/* =======================
-   SILENCE TIMER
-======================= */
+
+//    SILENCE TIMER
 
 function resetSilenceTimer() {
     clearTimeout(silenceTimeout);
@@ -1328,9 +1316,8 @@ function resetSilenceTimer() {
     }
 }
 
-/* =======================
-   SCORE FORMATTING
-======================= */
+
+//    SCORE FORMATTING
 
 function getScoreEmoji(score) {
     if (score >= 0.75) return "🟢";
@@ -1347,9 +1334,7 @@ function getScoreGrade(score) {
     return "Poor";
 }
 
-/* =======================
-   DISPLAY RESULTS
-======================= */
+//    DISPLAY RESULTS
 
 function displayResults(summary) {
     const transcript = document.getElementById("transcript");
@@ -1415,9 +1400,7 @@ function displayResults(summary) {
     transcript.scrollTop = 0;
 }
 
-/* =======================
-   START INTERVIEW
-======================= */
+//    START INTERVIEW
 
 async function startInterview() {
     if (isRunning) {
@@ -1580,9 +1563,7 @@ async function startInterview() {
     }
 }
 
-/* =======================
-   STOP INTERVIEW
-======================= */
+//    STOP INTERVIEW
 
 function stopInterview(reset = true) {
     log("Stopping...", "info");
@@ -1611,9 +1592,7 @@ function stopInterview(reset = true) {
     }
 }
 
-/* =======================
-   SUBMIT ANSWER
-======================= */
+//    SUBMIT ANSWER
 
 function submitAnswer() {
     if (ws?.readyState === WebSocket.OPEN && isRunning) {
@@ -1625,9 +1604,7 @@ function submitAnswer() {
     }
 }
 
-/* =======================
-   EVENTS
-======================= */
+//    EVENTS
 
 startBtn.addEventListener("click", async () => {
     startBtn.disabled = true;
