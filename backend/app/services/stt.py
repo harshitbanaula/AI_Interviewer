@@ -1,9 +1,9 @@
-
 # backend/app/services/stt.py
+
 import numpy as np
 from faster_whisper import WhisperModel
 
-# Initialize the Whisper model 
+# Initialize Whisper model once (global, safe)
 model = WhisperModel(
     model_size_or_path="small",
     device="cpu",
@@ -11,30 +11,41 @@ model = WhisperModel(
 )
 
 
-# Transcribes a short audio chunk (~1–2 seconds) Returns partial transcript
-
 def transcribe_chunk(audio_buffer: bytes, sample_rate: int = 16000) -> str:
-    
 
     if not audio_buffer:
         return ""
 
-    # Convert bytes → float32 numpy array
-    audio_np = np.frombuffer(audio_buffer, dtype=np.float32)
+    try:
 
-    if len(audio_np) < sample_rate:
+        audio_int16 = np.frombuffer(audio_buffer, dtype=np.int16)
+
+        if len(audio_int16) == 0:
+            return ""
+
+        # Normalize to float32 (-1.0 to 1.0)
+        audio_np = audio_int16.astype(np.float32) / 32768.0
+
+        # Guard: very short chunks create noise
+        if len(audio_np) < sample_rate // 2:
+            return ""
+
+        # Transcribe
+        segments, _ = model.transcribe(
+            audio_np,
+            language="en",
+            beam_size=1,
+            vad_filter=True
+        )
+
+        text_parts = []
+        for segment in segments:
+            cleaned = segment.text.strip()
+            if cleaned:
+                text_parts.append(cleaned)
+
+        return " ".join(text_parts).strip()
+
+    except Exception as e:
+        print(f"[STT ERROR] {e}")
         return ""
-
-    segments, _ = model.transcribe(
-        audio_np,
-        language="en",
-        beam_size=1,
-        vad_filter=True
-    )
-
-    text = ""
-    for segment in segments:
-        text += segment.text.strip() + " "
-
-    return text.strip()
-

@@ -596,29 +596,48 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 socket_open = False
 
     async def send_end_and_close():
-        nonlocal end_sent, socket_open
+        nonlocal end_sent, socket_open, audio_buffer
+
         if end_sent or not socket_open:
             return
 
-        # Force finalization with current answer if needed
+        # Transcribe pending audio before finalizing 
         if not session.completed:
+            if session.expecting_answer and audio_buffer:
+                try:
+                    answer_text = transcribe_chunk(bytes(audio_buffer))
+                    audio_buffer.clear()
+
+                    if answer_text.strip():
+                        print(f"[SESSION {session_id}] Timeout transcription captured.")
+                        session.save_answer(answer_text)
+                    else:
+                        print(f"[SESSION {session_id}] Timeout - no valid speech detected.")
+
+                except Exception as e:
+                    print(f"[SESSION {session_id}] Timeout transcription error: {e}")
+
+
+            #Finalize Safely (atomic handled inside session)
+
             session._finalize_interview(force_save_current_answer=True)
 
         summary = session.final_result()
-        print(f"[SESSION {session_id}] Sending END. Questions: {summary['questions_asked']}, Answers: {summary['questions_answered']}")
+
+        print(
+        f"[SESSION {session_id}] Sending END. "
+        f"Questions: {summary['questions_asked']}, "
+        f"Answers: {summary['questions_answered']}"
+        )
+
         await safe_send_json({"type": "END", "summary": summary})
+
         end_sent = True
-        socket_open = False
-        
+        socket_open = True
         await asyncio.sleep(0.5)
         await ws.close()
 
-    # Send initial timer 
-    await safe_send_json({
-        "type": "TIMER_INIT",
-        "main_time_seconds": session.SESSION_LIMIT_SECONDS,
-        "buffer_time_seconds": session.GRACE_PERIOD_SECONDS
-    })
+       
 
     audio_buffer = bytearray()
 
@@ -739,7 +758,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                     if msg_type == "TTS_PLAYBACK_END":
                         session.resume_timer()
                         continue
-                    # -------------------------
+                    # ------------------------------------
 
                     if action == "SUBMIT_ANSWER":
                         

@@ -54,6 +54,7 @@ from uuid import uuid4
 import os
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 app = FastAPI(title="AI Interviewer")
@@ -61,7 +62,7 @@ app = FastAPI(title="AI Interviewer")
 # CORS Configuration - CRITICAL for WebSocket
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

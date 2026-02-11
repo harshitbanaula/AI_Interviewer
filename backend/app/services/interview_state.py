@@ -520,8 +520,10 @@ import time
 from typing import Dict, List, Optional
 
 from app.services.question_generator import generate_question
-from app.services.evaluator import score_answer, set_current_question
+from app.services.evaluator import score_answer
 from app.services.llm_feedback import generate_feedback
+
+import threading  # for session store make thread safe
 
 
 class InterviewSession:
@@ -598,8 +600,7 @@ class InterviewSession:
         return self.get_effective_elapsed_time() >= (self.SESSION_LIMIT_SECONDS + self.GRACE_PERIOD_SECONDS)
 
     def _question_limit_reached(self) -> bool:
-        total_allowed = self.MAX_TECH_QUESTIONS + 1 
-        return len(self.answers) >= total_allowed
+        return len(self.answers) >= self.MAX_TECH_QUESTIONS
 
     def _should_end_interview(self) -> bool:
         return self.completed or self._buffer_time_exceeded()
@@ -607,33 +608,33 @@ class InterviewSession:
     def _finalize_interview(self, force_save_current_answer: bool = False):
         if self.completed:
             return
+        # Mark completed immediately (prevents race condition)
+        self.completed=True
+        self.expecting_answer = False
 
-        # If buffer time expired and user is still answering, save what they have
-        if force_save_current_answer and self.expecting_answer and len(self.questions) > len(self.answers):
-            # User was in middle of answering - save empty answer
+        # if user was mid-answer and nothing saved yet
+        if(force_save_current_answer and len(self.questions) > len(self.answers)):
             current_question = self.questions[-1]
             self.answers.append("Answer not completed (time expired)")
-            
-            if self.current_question_start:
-                # Calculate duration, subtracting any pauses that happened during this specific answer 
-                # (though usually AI doesn't speak *during* answer, only before)
-                self.answer_durations.append(
-                    round(time.time() - self.current_question_start, 2)
-                )
-            else:
-                self.answer_durations.append(0.0)
-            
-            # Score the incomplete answer
-            set_current_question(current_question)
-            score = score_answer("Answer not completed (time expired)", current_question)
-            self.scores.append(score)
 
-        self.completed = True
-        self.expecting_answer = False
+            if self.current_question_start:
+                duration = time.time() - self.current_question_start
+            else:
+                duration = 0.0
+            
+            self.answer_durations.append(round(max(duration, 0),2))
+
+            score = score_answer(
+                "answer not completed (time expired)",
+                current_question
+            )
+            self.scores.append(score)
         self.current_question_start = None
-        
-        # ALWAYS generate feedback
+
+        # GEnerate feedback exactly once 
         self.generate_feedback()
+        
+       
 
     # HELPERS
 
@@ -750,7 +751,6 @@ class InterviewSession:
         self.current_question_start = None
 
         # Score answer
-        set_current_question(question)
         score = score_answer(answer_text, question)
 
         self.answers.append(answer_text)
@@ -820,15 +820,18 @@ class InterviewSession:
 # SESSION STORE
 
 _sessions: Dict[str, InterviewSession] = {}
+_sessions_lock = threading.Lock()
 
 
 def create_session(session_id: str, job_description: str, resume_text: str) -> str:
-    _sessions[session_id] = InterviewSession(
-        resume_text=resume_text,
-        job_description=job_description
-    )
+    with _sessions_lock:
+        _sessions[session_id] = InterviewSession(
+            resume_text=resume_text,
+            job_description=job_description
+        )
     return session_id
 
 
 def get_session(session_id: str) -> Optional[InterviewSession]:
-    return _sessions.get(session_id)
+    with _sessions_lock:
+        return _sessions.get(session_id)

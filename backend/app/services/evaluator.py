@@ -133,14 +133,7 @@ llm = ChatGroq(
     max_tokens=350,
 )
 
-# ----------------------------
-# GLOBAL STATE (current question)
-# ----------------------------
-_CURRENT_QUESTION: Optional[str] = None
 
-def set_current_question(question: str):
-    global _CURRENT_QUESTION
-    _CURRENT_QUESTION = question
 
 # ----------------------------
 # LLM PROMPT
@@ -191,16 +184,8 @@ WEIGHTS = {
 # ----------------------------
 # MAIN EVALUATOR
 # ----------------------------
-def score_answer(answer_text: str, question: Optional[str] = None) -> Dict:
-    """
-    Evaluate candidate's answer.
-    Backend metrics = authority.
-    LLM = advisory.
-    """
+def score_answer(answer_text: str, question: str) -> Dict:
 
-    global _CURRENT_QUESTION
-    if question:
-        _CURRENT_QUESTION = question
 
     answer_text = answer_text.strip()
     if not answer_text or answer_text.lower() in ("no answer", "no answer provided"):
@@ -230,18 +215,17 @@ def score_answer(answer_text: str, question: Optional[str] = None) -> Dict:
     # LLM Evaluation
     # ----------------------------
     try:
-        if _CURRENT_QUESTION:
-            raw = chain.invoke({
-                "question": _CURRENT_QUESTION,
-                "answer": answer_text
-            })
-            parsed = json.loads(raw)
+        raw = chain.invoke({
+            "question": question,
+            "answer": answer_text
+        })
+        parsed = json.loads(raw)
 
-            semantic_correctness = float(parsed.get("semantic_correctness", 0.5))
-            reasoning_quality = float(parsed.get("reasoning_quality", 0.5))
-            clarity = float(parsed.get("clarity", 0.5))
-            strengths = parsed.get("strengths", [])
-            improvements = parsed.get("improvements", [])
+        semantic_correctness = float(parsed.get("semantic_correctness", 0.5))
+        reasoning_quality = float(parsed.get("reasoning_quality", 0.5))
+        clarity = float(parsed.get("clarity", 0.5))
+        strengths = parsed.get("strengths", [])
+        improvements = parsed.get("improvements", [])
 
     except Exception:
         # fallback safe values
@@ -259,8 +243,6 @@ def score_answer(answer_text: str, question: Optional[str] = None) -> Dict:
         2
     )
 
-    # Clear current question
-    _CURRENT_QUESTION = None
 
     return {
         "length_correctness": round(length_correctness, 2),

@@ -1231,9 +1231,10 @@ function resumeTimer() {
 function floatTo16BitPCM(float32Array) {
     const buffer = new ArrayBuffer(float32Array.length * 2);
     const view = new DataView(buffer);
-    for (let i = 0; i < float32Array.length; i++) {
+    let offset =0;
+    for (let i = 0; i < float32Array.length; i++,offset +=2) {
         let s = Math.max(-1, Math.min(1, float32Array[i]));
-        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        view.setInt16(offset,s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
     return buffer;
 }
@@ -1273,7 +1274,7 @@ async function playAudioBytes(arrayBuffer) {
         }
 
         if (isRunning) {
-            resumeTimer(); // Local resume
+            resumeTimer();
             unmuteMic();
             submitBtn.disabled = false;
             resetSilenceTimer();
@@ -1435,6 +1436,46 @@ async function startInterview() {
         transcript.textContent += "✅ Connected\n";
     };
 
+    // ---- AUDIO INIT ----
+try {
+    log("Requesting microphone...", "info");
+
+    audioContext = new AudioContext({ sampleRate: 16000 });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    log("Microphone granted", "success");
+
+    source = audioContext.createMediaStreamSource(stream);
+    processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = function (e) {
+        if (!isRunning || !micEnabled) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const input = e.inputBuffer.getChannelData(0);
+        const pcmBuffer = floatTo16BitPCM(input);
+
+        ws.send(pcmBuffer);
+    };
+
+    // Connect graph properly
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    micEnabled = true;
+
+    log("Audio processing started (PCM16)", "success");
+
+    stopBtn.disabled = false;
+    submitBtn.disabled = false;
+
+} catch (err) {
+    log(`Microphone failed: ${err.message}`, "error");
+    alert(`Microphone access denied: ${err.message}`);
+    stopInterview(false);
+}
+
+
     ws.onmessage = async (event) => {
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
@@ -1542,13 +1583,13 @@ async function startInterview() {
         source = audioContext.createMediaStreamSource(stream);
         processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        processor.onaudioprocess = (e) => {
-            if (!isRunning || !micEnabled || isAISpeaking) return;
-            if (ws?.readyState === WebSocket.OPEN) {
-                ws.send(floatTo16BitPCM(e.inputBuffer.getChannelData(0)));
-                resetSilenceTimer();
-            }
-        };
+        processor.onaudioprocess = function(e) {
+            if (!isRunning) return;
+            const input = e.inputBuffer.getChannelData(0);
+            const pcmBuffer = floatTo16BitPCM(input);
+            ws.send(pcmBuffer);
+            };
+        
 
         unmuteMic();
         log("Audio processing started", "success");
