@@ -761,6 +761,8 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                     # ------------------------------------
 
                     if action == "SUBMIT_ANSWER":
+                        if not session.expecting_answer:
+                            continue
                         
                         # Transcribe
                         if audio_buffer:
