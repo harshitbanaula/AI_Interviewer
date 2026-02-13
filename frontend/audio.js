@@ -1054,45 +1054,38 @@
 
 
 
+// frontend/audio.js - FIXED VERSION FOR AUDIO_STORAGE
 
+// Prevent page reload
+window.addEventListener('beforeunload', (e) => {
+    if (isRunning) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
 
-// frontend/audio.js - WITH BUFFER TIME FIX AND SYNC
-
-
-//    TIMER STATE
-
-
+// ─── TIMER STATE ───
 let warned10Min = false;
 let warned5Min = false;
 let bufferWarningShown = false;
-
-let totalSeconds = 0;
-let mainTimeSeconds = 0;
-let bufferTimeSeconds = 0;
 let remainingSeconds = 0;
 let timerInterval = null;
 let isTimerPaused = false;
 let inBufferTime = false;
 
-//    AUDIO / WS STATE
-
-
+// ─── AUDIO / WS STATE ───
 let audioContext = null;
 let processor = null;
 let source = null;
 let stream = null;
-
 let isRunning = false;
 let sessionId = null;
 let silenceTimeout = null;
 let ws = null;
-
 let micEnabled = false;
 let isAISpeaking = false;
 
-
-//    UI ELEMENTS
-
+// ─── UI ELEMENTS ───
 const resumeInput = document.getElementById("resumeFile");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
@@ -1102,9 +1095,7 @@ resumeInput.addEventListener("change", () => {
     startBtn.disabled = false;
 });
 
-//    LOGGING
-
-
+// ─── LOGGING ───
 function log(message, type = "info") {
     const timestamp = new Date().toLocaleTimeString();
     const prefix = {
@@ -1113,12 +1104,10 @@ function log(message, type = "info") {
         "error": "❌",
         "warning": "⚠️"
     }[type] || "ℹ️";
-    
     console.log(`[${timestamp}] ${prefix} ${message}`);
 }
 
-//    RESUME UPLOAD
-
+// ─── RESUME UPLOAD ───
 async function uploadResume() {
     const file = resumeInput.files[0];
     if (!file) {
@@ -1154,8 +1143,7 @@ async function uploadResume() {
     }
 }
 
-//    TIMER HELPERS
-
+// ─── TIMER HELPERS ───
 function formatTime(seconds) {
     if (typeof seconds !== "number" || isNaN(seconds) || seconds < 0) {
         return "00:00";
@@ -1169,17 +1157,14 @@ function updateTimerUI(seconds, isBuffer = false) {
     const timerEl = document.getElementById("timer");
     if (!timerEl || typeof seconds !== "number" || isNaN(seconds)) return;
 
-    // Show different prefix for buffer time
     const prefix = isBuffer ? "⏰ BUFFER TIME: " : "⏱️ ";
     timerEl.textContent = `${prefix}${formatTime(seconds)}`;
     
     timerEl.classList.remove("green", "yellow", "red");
 
     if (isBuffer) {
-        // Buffer time is always red and pulsing
         timerEl.classList.add("red");
     } else {
-        // Normal time colors
         if (seconds <= 300) {
             timerEl.classList.add("red");
             if (!warned5Min) {
@@ -1226,15 +1211,14 @@ function resumeTimer() {
     isTimerPaused = false;
 }
 
-//    AUDIO HELPERS
-
+// ─── AUDIO HELPERS ───
 function floatTo16BitPCM(float32Array) {
     const buffer = new ArrayBuffer(float32Array.length * 2);
     const view = new DataView(buffer);
-    let offset =0;
-    for (let i = 0; i < float32Array.length; i++,offset +=2) {
+    let offset = 0;
+    for (let i = 0; i < float32Array.length; i++, offset += 2) {
         let s = Math.max(-1, Math.min(1, float32Array[i]));
-        view.setInt16(offset,s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
     return buffer;
 }
@@ -1243,11 +1227,10 @@ async function playAudioBytes(arrayBuffer) {
     if (!arrayBuffer || !audioContext) return;
 
     isAISpeaking = true;
-    pauseTimer(); // Local pause
+    pauseTimer();
     muteMic();
     submitBtn.disabled = true;
 
-    // NOTIFY BACKEND TO PAUSE TIMER
     if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "TTS_PLAYBACK_START" }));
     }
@@ -1268,7 +1251,6 @@ async function playAudioBytes(arrayBuffer) {
     } finally {
         isAISpeaking = false;
         
-        // NOTIFY BACKEND TO RESUME TIMER
         if (ws?.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "TTS_PLAYBACK_END" }));
         }
@@ -1282,8 +1264,7 @@ async function playAudioBytes(arrayBuffer) {
     }
 }
 
-//    MIC CONTROL
-
+// ─── MIC CONTROL ───
 function muteMic() {
     try {
         processor?.disconnect();
@@ -1302,9 +1283,7 @@ function unmuteMic() {
     } catch {}
 }
 
-
-//    SILENCE TIMER
-
+// ─── SILENCE TIMER ───
 function resetSilenceTimer() {
     clearTimeout(silenceTimeout);
     if (isRunning && !isAISpeaking) {
@@ -1317,9 +1296,7 @@ function resetSilenceTimer() {
     }
 }
 
-
-//    SCORE FORMATTING
-
+// ─── SCORE FORMATTING ───
 function getScoreEmoji(score) {
     if (score >= 0.75) return "🟢";
     if (score >= 0.50) return "🟡";
@@ -1335,8 +1312,7 @@ function getScoreGrade(score) {
     return "Poor";
 }
 
-//    DISPLAY RESULTS
-
+// ─── DISPLAY RESULTS ───
 function displayResults(summary) {
     const transcript = document.getElementById("transcript");
     transcript.textContent = "";
@@ -1347,7 +1323,6 @@ function displayResults(summary) {
     transcript.textContent += "╚═══════════════════════════════════════════════════════════════════╝\n";
     transcript.textContent += "\n\n";
     
-    // QUESTION-WISE SCORES
     transcript.textContent += "┌─────────────────────────────────────────────────────────────────┐\n";
     transcript.textContent += "│                    QUESTION-WISE SCORES                         │\n";
     transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
@@ -1364,7 +1339,6 @@ function displayResults(summary) {
         transcript.textContent += `   Score: ${score.final_score.toFixed(2)} (${grade}) | Time: ${Math.floor(duration)}s\n\n`;
     });
     
-    // OVERALL SUMMARY
     transcript.textContent += "\n┌─────────────────────────────────────────────────────────────────┐\n";
     transcript.textContent += "│                      OVERALL SUMMARY                            │\n";
     transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
@@ -1382,7 +1356,6 @@ function displayResults(summary) {
         transcript.textContent += `💼 Projects Covered:   ${summary.covered_projects.join(', ')}\n`;
     }
     
-    // FEEDBACK
     transcript.textContent += "\n\n┌─────────────────────────────────────────────────────────────────┐\n";
     transcript.textContent += "│                         FEEDBACK                                │\n";
     transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
@@ -1401,8 +1374,7 @@ function displayResults(summary) {
     transcript.scrollTop = 0;
 }
 
-//    START INTERVIEW
-
+// ─── START INTERVIEW ───
 async function startInterview() {
     if (isRunning) {
         log("Already running", "warning");
@@ -1416,15 +1388,52 @@ async function startInterview() {
     bufferWarningShown = false;
     inBufferTime = false;
 
+    // Step 1: Upload resume
     sessionId = await uploadResume();
     if (!sessionId) {
         isRunning = false;
+        startBtn.disabled = false;
         return;
     }
 
     const transcript = document.getElementById("transcript");
     transcript.textContent = "Interview starting...\n";
 
+    // Step 2: Initialize audio FIRST (before WebSocket)
+    try {
+        log("Requesting microphone...", "info");
+
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        log("Microphone granted", "success");
+
+        source = audioContext.createMediaStreamSource(stream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = function (e) {
+            if (!isRunning || !micEnabled) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const input = e.inputBuffer.getChannelData(0);
+            const pcmBuffer = floatTo16BitPCM(input);
+            ws.send(pcmBuffer);
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+        micEnabled = true;
+
+        log("Audio processing started (PCM16)", "success");
+
+    } catch (err) {
+        log(`Microphone failed: ${err.message}`, "error");
+        alert(`Microphone access denied: ${err.message}`);
+        stopInterview(true);
+        return;
+    }
+
+    // Step 3: Create WebSocket AFTER audio is ready
     const wsUrl = `ws://localhost:8000/ws/interview?session_id=${sessionId}`;
     log(`Connecting to WebSocket`, "info");
 
@@ -1434,76 +1443,25 @@ async function startInterview() {
     ws.onopen = () => {
         log("WebSocket connected", "success");
         transcript.textContent += "✅ Connected\n";
+        stopBtn.disabled = false;
+        submitBtn.disabled = false;
     };
-
-    // ---- AUDIO INIT ----
-try {
-    log("Requesting microphone...", "info");
-
-    audioContext = new AudioContext({ sampleRate: 16000 });
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    log("Microphone granted", "success");
-
-    source = audioContext.createMediaStreamSource(stream);
-    processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-    processor.onaudioprocess = function (e) {
-        if (!isRunning || !micEnabled) return;
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-        const input = e.inputBuffer.getChannelData(0);
-        const pcmBuffer = floatTo16BitPCM(input);
-
-        ws.send(pcmBuffer);
-    };
-
-    // Connect graph properly
-    source.connect(processor);
-    processor.connect(audioContext.destination);
-
-    micEnabled = true;
-
-    log("Audio processing started (PCM16)", "success");
-
-    stopBtn.disabled = false;
-    submitBtn.disabled = false;
-
-} catch (err) {
-    log(`Microphone failed: ${err.message}`, "error");
-    alert(`Microphone access denied: ${err.message}`);
-    stopInterview(false);
-}
-
 
     ws.onmessage = async (event) => {
         if (typeof event.data === "string") {
             const data = JSON.parse(event.data);
             
-            // Don't log TIMER_UPDATE constantly to keep console clean
-            if(data.type !== "TIMER_UPDATE") {
+            if (data.type !== "TIMER_UPDATE") {
                 log(`Message: ${data.type}`, "info");
             }
 
             switch (data.type) {
-                case "TIMER_INIT":
-                    mainTimeSeconds = data.main_time_seconds;
-                    bufferTimeSeconds = data.buffer_time_seconds;
-                    // Start with ONLY main time (45 minutes)
-                    remainingSeconds = mainTimeSeconds;
-                    updateTimerUI(remainingSeconds, false);
-                    startLocalCountdown();
-                    log(`Timer started: ${mainTimeSeconds}s main + ${bufferTimeSeconds}s buffer`, "success");
-                    break;
-
                 case "TIMER_UPDATE":
                     const newRemaining = data.remaining_seconds;
                     const nowInBuffer = data.in_buffer_time || false;
                     
-                    // Sync the timer to backend
                     remainingSeconds = newRemaining;
 
-                    // Check if we transitioned to buffer time
                     if (nowInBuffer && !inBufferTime) {
                         inBufferTime = true;
                         
@@ -1520,7 +1478,6 @@ try {
                 case "BUFFER_TIME_WARNING":
                     if (!bufferWarningShown && !inBufferTime) {
                         inBufferTime = true;
-                        remainingSeconds = bufferTimeSeconds;
                         bufferWarningShown = true;
                         alert(data.message);
                         updateTimerUI(remainingSeconds, true);
@@ -1573,39 +1530,9 @@ try {
             stopInterview(false);
         }
     };
-
-    try {
-        log("Requesting microphone...", "info");
-        audioContext = new AudioContext({ sampleRate: 16000 });
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        log("Microphone granted", "success");
-
-        source = audioContext.createMediaStreamSource(stream);
-        processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-        processor.onaudioprocess = function(e) {
-            if (!isRunning) return;
-            const input = e.inputBuffer.getChannelData(0);
-            const pcmBuffer = floatTo16BitPCM(input);
-            ws.send(pcmBuffer);
-            };
-        
-
-        unmuteMic();
-        log("Audio processing started", "success");
-
-        stopBtn.disabled = false;
-        submitBtn.disabled = false;
-
-    } catch (err) {
-        log(`Microphone failed: ${err.message}`, "error");
-        alert(`Microphone access denied: ${err.message}`);
-        stopInterview(false);
-    }
 }
 
-//    STOP INTERVIEW
-
+// ─── STOP INTERVIEW ───
 function stopInterview(reset = true) {
     log("Stopping...", "info");
     
@@ -1633,8 +1560,7 @@ function stopInterview(reset = true) {
     }
 }
 
-//    SUBMIT ANSWER
-
+// ─── SUBMIT ANSWER ───
 function submitAnswer() {
     if (ws?.readyState === WebSocket.OPEN && isRunning) {
         log("Submitting answer", "info");
@@ -1645,17 +1571,21 @@ function submitAnswer() {
     }
 }
 
-//    EVENTS
-
-startBtn.addEventListener("click", async () => {
+// ─── EVENT LISTENERS ───
+startBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
     startBtn.disabled = true;
     await startInterview();
 });
 
-stopBtn.addEventListener("click", () => {
+stopBtn.addEventListener("click", (e) => {
+    e.preventDefault();
     stopInterview(true);
 });
 
-submitBtn.addEventListener("click", submitAnswer);
+submitBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    submitAnswer();
+});
 
 log("Loaded successfully", "success");
