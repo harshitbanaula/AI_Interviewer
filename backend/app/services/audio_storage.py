@@ -7,10 +7,6 @@ import wave
 RECORDINGS_ROOT = "recordings"
 
 def save_candidate_audio(session_id: str, question_index: int, audio_data: bytes, sample_rate: int = 16000):
-    """
-    Saves raw PCM16 audio data to a WAV file locally.
-    Structure: recordings/{session_id}/question_{index}.wav
-    """
     try:
         if not audio_data:
             return None

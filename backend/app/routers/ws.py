@@ -816,8 +816,6 @@
 #         if socket_open and not end_sent:
 #             await send_end_and_close()
 
-
-
 # backend/app/routers/ws.py
 
 import time
@@ -910,7 +908,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         await safe_send_json({"type": "END", "summary": summary})
 
         end_sent = True
-        socket_open = True
+        socket_open = False
         await asyncio.sleep(0.5)
         await ws.close()
 
@@ -975,7 +973,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 print(f"[SESSION {session_id}] Main time expired, entering buffer time")
                 await safe_send_json({
                     "type": "BUFFER_TIME_WARNING",
-                    "message": " Main time expired! You have 2 minutes buffer time remaining."
+                    "message": "⚠️ Main time expired! You have 2 minutes buffer time remaining."
                 })
                 buffer_warning_sent = True
             
