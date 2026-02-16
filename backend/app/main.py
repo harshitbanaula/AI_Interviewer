@@ -52,6 +52,7 @@ from app.services.interview_state import create_session
 from app.services.resume_parser import parse_resume
 from uuid import uuid4
 import os
+from app.services.job_inference import infer_job_description
 from dotenv import load_dotenv
 
 
@@ -79,36 +80,37 @@ def health():
     return {"status": "running", "message": "AI Interviewer API is operational"}
 
 @app.post("/upload_resume")
-async def upload_resume(file: UploadFile = File(...), job_description: str = Form(...)):
+async def upload_resume(file: UploadFile = File(...)):
     """
     Upload resume and create interview session
     """
     try:
-        print(f"📄 Uploading resume: {file.filename}")
+        print(f"Uploading resume: {file.filename}")
         
         # Read file content
         content = await file.read()
         
         # Parse resume
         resume_text = parse_resume(file.filename, content)
-        print(f"✅ Resume parsed successfully: {len(resume_text)} characters")
-        
+        print(f"Resume parsed successfully: {len(resume_text)} characters")
+        job_description = infer_job_description(resume_text)
         # Generate session ID
         session_id = str(uuid4())
-        print(f"🆔 Generated session ID: {session_id}")
+        print(f"Generated session ID: {session_id}")
         
         # Create session
-        create_session(session_id, job_description, resume_text)
-        print(f"✅ Session created successfully")
+        create_session(session_id,job_description, resume_text)
+        print(f"Session created successfully")
         
         return {
             "session_id": session_id,
+            "job description ": job_description,
             "status": "success",
             "message": "Resume uploaded successfully"
         }
         
     except Exception as e:
-        print(f"❌ Error uploading resume: {str(e)}")
+        print(f" Error uploading resume: {str(e)}")
         import traceback
         traceback.print_exc()
         return {

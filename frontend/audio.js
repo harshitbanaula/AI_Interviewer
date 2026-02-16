@@ -1053,16 +1053,7 @@
 
 
 
-
-// frontend/audio.js - FIXED VERSION FOR AUDIO_STORAGE
-
-// Prevent page reload
-window.addEventListener('beforeunload', (e) => {
-    if (isRunning) {
-        e.preventDefault();
-        e.returnValue = '';
-    }
-});
+// frontend/audio.js - FULLY CONTINUOUS TIMER (NO INTERRUPTIONS)
 
 // ─── TIMER STATE ───
 let warned10Min = false;
@@ -1070,7 +1061,6 @@ let warned5Min = false;
 let bufferWarningShown = false;
 let remainingSeconds = 0;
 let timerInterval = null;
-let isTimerPaused = false;
 let inBufferTime = false;
 
 // ─── AUDIO / WS STATE ───
@@ -1119,7 +1109,6 @@ async function uploadResume() {
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("job_description", "Python Developer");
 
     try {
         const res = await fetch("http://localhost:8000/upload_resume", {
@@ -1186,8 +1175,11 @@ function updateTimerUI(seconds, isBuffer = false) {
 function startLocalCountdown() {
     if (timerInterval) return;
 
+    log("Starting continuous timer", "info");
+    
     timerInterval = setInterval(() => {
-        if (!isRunning || isTimerPaused || remainingSeconds <= 0) return;
+        // Timer ALWAYS runs - never stops until interview ends
+        if (!isRunning || remainingSeconds <= 0) return;
 
         remainingSeconds--;
         updateTimerUI(remainingSeconds, inBufferTime);
@@ -1199,16 +1191,9 @@ function startLocalCountdown() {
 }
 
 function stopTimer() {
+    log("Stopping timer", "info");
     clearInterval(timerInterval);
     timerInterval = null;
-}
-
-function pauseTimer() {
-    isTimerPaused = true;
-}
-
-function resumeTimer() {
-    isTimerPaused = false;
 }
 
 // ─── AUDIO HELPERS ───
@@ -1226,14 +1211,11 @@ function floatTo16BitPCM(float32Array) {
 async function playAudioBytes(arrayBuffer) {
     if (!arrayBuffer || !audioContext) return;
 
+    log("Playing TTS audio", "info");
+    
     isAISpeaking = true;
-    pauseTimer();
-    muteMic();
-    submitBtn.disabled = true;
-
-    if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "TTS_PLAYBACK_START" }));
-    }
+    muteMic();  // Mute mic during AI speech
+    submitBtn.disabled = true;  // Disable submit during AI speech
 
     try {
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -1246,19 +1228,16 @@ async function playAudioBytes(arrayBuffer) {
             src.start(0);
         });
 
+        log("TTS playback complete", "success");
+
     } catch (e) {
         log(`TTS error: ${e.message}`, "error");
     } finally {
         isAISpeaking = false;
-        
-        if (ws?.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "TTS_PLAYBACK_END" }));
-        }
 
         if (isRunning) {
-            resumeTimer();
-            unmuteMic();
-            submitBtn.disabled = false;
+            unmuteMic();  // Re-enable mic
+            submitBtn.disabled = false;  // Re-enable submit
             resetSilenceTimer();
         }
     }
@@ -1388,7 +1367,6 @@ async function startInterview() {
     bufferWarningShown = false;
     inBufferTime = false;
 
-    // Step 1: Upload resume
     sessionId = await uploadResume();
     if (!sessionId) {
         isRunning = false;
@@ -1399,7 +1377,7 @@ async function startInterview() {
     const transcript = document.getElementById("transcript");
     transcript.textContent = "Interview starting...\n";
 
-    // Step 2: Initialize audio FIRST (before WebSocket)
+    // Initialize audio FIRST
     try {
         log("Requesting microphone...", "info");
 
@@ -1433,7 +1411,7 @@ async function startInterview() {
         return;
     }
 
-    // Step 3: Create WebSocket AFTER audio is ready
+    // Create WebSocket
     const wsUrl = `ws://localhost:8000/ws/interview?session_id=${sessionId}`;
     log(`Connecting to WebSocket`, "info");
 
@@ -1452,7 +1430,7 @@ async function startInterview() {
             const data = JSON.parse(event.data);
             
             if (data.type !== "TIMER_UPDATE") {
-                log(`Message: ${data.type}`, "info");
+                log(`← ${data.type}`, "info");
             }
 
             switch (data.type) {
@@ -1460,8 +1438,10 @@ async function startInterview() {
                     const newRemaining = data.remaining_seconds;
                     const nowInBuffer = data.in_buffer_time || false;
                     
+                    // Sync timer from backend
                     remainingSeconds = newRemaining;
 
+                    // Check buffer time transition
                     if (nowInBuffer && !inBufferTime) {
                         inBufferTime = true;
                         
@@ -1472,7 +1452,13 @@ async function startInterview() {
                         }
                     }
                     
+                    // Update UI (timer keeps running)
                     updateTimerUI(remainingSeconds, inBufferTime);
+                    
+                    // Start local countdown if not already running
+                    if (!timerInterval) {
+                        startLocalCountdown();
+                    }
                     break;
 
                 case "BUFFER_TIME_WARNING":
@@ -1486,13 +1472,15 @@ async function startInterview() {
                     break;
 
                 case "QUESTION":
+                    log(`Question received: ${data.text.substring(0, 50)}...`, "info");
                     transcript.textContent += `\n❓ ${data.text}\n`;
                     transcript.scrollTop = transcript.scrollHeight;
                     resetSilenceTimer();
                     break;
 
                 case "FINAL_TRANSCRIPT":
-                    transcript.textContent += `\nYou: ${data.text}\n`;
+                    log(`Transcript: ${data.text.substring(0, 30)}...`, "info");
+                    transcript.textContent += `\n💬 You: ${data.text}\n`;
                     transcript.scrollTop = transcript.scrollHeight;
                     break;
 
@@ -1509,10 +1497,16 @@ async function startInterview() {
                     break;
 
                 case "TTS_START":
+                    log("TTS started", "info");
+                    break;
+
                 case "TTS_END":
+                    log("TTS ended", "info");
                     break;
             }
         } else {
+            // Binary audio data
+            log(`← Audio: ${event.data.byteLength} bytes`, "info");
             await playAudioBytes(event.data);
         }
     };
@@ -1534,10 +1528,9 @@ async function startInterview() {
 
 // ─── STOP INTERVIEW ───
 function stopInterview(reset = true) {
-    log("Stopping...", "info");
+    log("Stopping interview...", "info");
     
     isRunning = false;
-    pauseTimer();
     stopTimer();
     clearTimeout(silenceTimeout);
 
@@ -1563,11 +1556,12 @@ function stopInterview(reset = true) {
 // ─── SUBMIT ANSWER ───
 function submitAnswer() {
     if (ws?.readyState === WebSocket.OPEN && isRunning) {
-        log("Submitting answer", "info");
+        log("→ Submitting answer", "info");
+        // Timer keeps running - no pause!
         ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
         clearTimeout(silenceTimeout);
     } else {
-        log(`Cannot submit: WS=${ws?.readyState}`, "warning");
+        log(`Cannot submit: WS=${ws?.readyState}, running=${isRunning}`, "warning");
     }
 }
 
@@ -1588,4 +1582,4 @@ submitBtn.addEventListener("click", (e) => {
     submitAnswer();
 });
 
-log("Loaded successfully", "success");
+log("Audio.js loaded successfully", "success");
