@@ -77,7 +77,7 @@
 
 
 -->
-
+<!-- 
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -205,4 +205,227 @@
   <script src="audio.js"></script>
 </body>
 </html>
+ -->
 
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 2.5em;
+        }
+
+        .controls {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 10px;
+        }
+
+        .file-input-wrapper {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .button-group {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 15px 25px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #startBtn {
+            background: #4CAF50;
+            color: white;
+            grid-column: 1 / -1;
+        }
+
+        #startBtn:hover:not(:disabled) {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        #stopBtn {
+            background: #f44336;
+            color: white;
+        }
+
+        #stopBtn:hover:not(:disabled) {
+            background: #da190b;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(244, 67, 54, 0.4);
+        }
+
+        #submitBtn {
+            background: #2196F3;
+            color: white;
+        }
+
+        #submitBtn:hover:not(:disabled) {
+            background: #0b7dda;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(33, 150, 243, 0.4);
+        }
+
+        #skipBtn {
+            background: #FF9800;
+            color: white;
+        }
+
+        #skipBtn:hover:not(:disabled) {
+            background: #e68900;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 152, 0, 0.4);
+        }
+
+        #timer {
+            text-align: center;
+            font-size: 2em;
+            font-weight: bold;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 10px;
+            background: #f5f5f5;
+        }
+
+        #timer.green {
+            color: #4CAF50;
+            background: #e8f5e9;
+        }
+
+        #timer.yellow {
+            color: #FF9800;
+            background: #fff3e0;
+        }
+
+        #timer.red {
+            color: #f44336;
+            background: #ffebee;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        #transcript {
+            background: #f9f9f9;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            min-height: 300px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: #333;
+        }
+
+        #transcript:empty::before {
+            content: "Interview transcript will appear here...";
+            color: #999;
+            font-style: italic;
+        }
+
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 AI Interview System</h1>
+        
+        <div class="controls">
+            <div class="file-input-wrapper">
+                <label for="resumeFile">Upload Your Resume (PDF)</label>
+                <input type="file" id="resumeFile" accept=".pdf" />
+            </div>
+            
+            <div class="button-group">
+                <button id="startBtn" disabled>Start Interview</button>
+                <button id="stopBtn" disabled>Stop Interview</button>
+                
+                <div class="action-buttons" style="grid-column: 1 / -1; margin-top: 10px;">
+                    <button id="submitBtn" disabled>Submit Answer</button>
+                    <button id="skipBtn" disabled>Skip Question ⏭️</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="timer">00:00</div>
+        <div id="transcript"></div>
+    </div>
+
+    <script src="audio.js"></script>
+</body>
+</html>

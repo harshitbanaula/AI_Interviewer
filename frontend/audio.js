@@ -1051,9 +1051,7 @@
 
 // log("Loaded successfully", "success");
 
-
-
-// frontend/audio.js - FULLY CONTINUOUS TIMER (NO INTERRUPTIONS)
+// frontend/audio.js - SINGLE SCREEN NO SCROLL UI
 
 // ─── TIMER STATE ───
 let warned10Min = false;
@@ -1075,11 +1073,16 @@ let ws = null;
 let micEnabled = false;
 let isAISpeaking = false;
 
+// ─── INTERVIEW STATE ───
+let currentQuestionNumber = 0;
+let currentQuestion = null;
+
 // ─── UI ELEMENTS ───
 const resumeInput = document.getElementById("resumeFile");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const submitBtn = document.getElementById("submitBtn");
+const skipBtn = document.getElementById("skipBtn");
 
 resumeInput.addEventListener("change", () => {
     startBtn.disabled = false;
@@ -1146,7 +1149,7 @@ function updateTimerUI(seconds, isBuffer = false) {
     const timerEl = document.getElementById("timer");
     if (!timerEl || typeof seconds !== "number" || isNaN(seconds)) return;
 
-    const prefix = isBuffer ? "⏰ BUFFER TIME: " : "⏱️ ";
+    const prefix = isBuffer ? "⏰ BUFFER: " : "⏱️ ";
     timerEl.textContent = `${prefix}${formatTime(seconds)}`;
     
     timerEl.classList.remove("green", "yellow", "red");
@@ -1178,7 +1181,6 @@ function startLocalCountdown() {
     log("Starting continuous timer", "info");
     
     timerInterval = setInterval(() => {
-        // Timer ALWAYS runs - never stops until interview ends
         if (!isRunning || remainingSeconds <= 0) return;
 
         remainingSeconds--;
@@ -1194,6 +1196,218 @@ function stopTimer() {
     log("Stopping timer", "info");
     clearInterval(timerInterval);
     timerInterval = null;
+}
+
+// ─── COMPACT SINGLE-SCREEN UI ───
+
+function showCurrentQuestion(questionText, questionNum) {
+    const transcript = document.getElementById("transcript");
+    
+    transcript.innerHTML = `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            animation: fadeIn 0.4s ease-in;
+        ">
+            <!-- Question Header - Compact -->
+            <div style="
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 15px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 10px;
+                margin-bottom: 12px;
+            ">
+                <div style="
+                    background: white;
+                    color: #667eea;
+                    width: 35px;
+                    height: 35px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 16px;
+                    font-weight: bold;
+                ">
+                    ${questionNum}
+                </div>
+                <div style="flex: 1; color: white;">
+                    <div style="font-weight: 600; font-size: 13px;">Question ${questionNum}/10</div>
+                    <div style="font-size: 11px; opacity: 0.9;">Active</div>
+                </div>
+                <div style="
+                    background: rgba(255,255,255,0.2);
+                    padding: 5px 12px;
+                    border-radius: 20px;
+                    font-size: 11px;
+                    color: white;
+                    font-weight: 600;
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                ">
+                    <div style="
+                        width: 8px;
+                        height: 8px;
+                        background: #f44336;
+                        border-radius: 50%;
+                        animation: blink 1s infinite;
+                    "></div>
+                    REC
+                </div>
+            </div>
+            
+            <!-- Question Content - Scrollable if needed -->
+            <div style="
+                flex: 1;
+                background: linear-gradient(to bottom, #e3f2fd 0%, #f3e5f5 100%);
+                padding: 20px;
+                border-radius: 10px;
+                border-left: 4px solid #2196F3;
+                overflow-y: auto;
+                margin-bottom: 12px;
+            ">
+                <div style="
+                    color: #1976D2;
+                    font-size: 12px;
+                    font-weight: 600;
+                    margin-bottom: 10px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                ">
+                    ❓ Your Question
+                </div>
+                <div style="
+                    color: #333;
+                    font-size: 16px;
+                    line-height: 1.6;
+                    font-weight: 500;
+                ">
+                    ${questionText}
+                </div>
+            </div>
+            
+            <!-- Status Bar - Compact -->
+            <div style="
+                background: #fff3e0;
+                padding: 12px 15px;
+                border-radius: 8px;
+                border: 2px solid #FF9800;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+            ">
+                <span style="font-size: 18px;">🎤</span>
+                <span style="color: #f57c00; font-weight: 600; font-size: 14px;">
+                    Listening...
+                </span>
+            </div>
+        </div>
+        
+        <style>
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+            @keyframes blink {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.3; }
+            }
+        </style>
+    `;
+}
+
+function showAnswerRecorded() {
+    const transcript = document.getElementById("transcript");
+    
+    transcript.innerHTML = `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            animation: fadeIn 0.4s ease-in;
+        ">
+            <div style="
+                width: 70px;
+                height: 70px;
+                background: #4CAF50;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 20px;
+                box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+            ">
+                <span style="font-size: 35px; color: white;">✓</span>
+            </div>
+            <div style="
+                color: #2E7D32;
+                font-size: 20px;
+                font-weight: bold;
+                margin-bottom: 8px;
+            ">
+                Answer Recorded!
+            </div>
+            <div style="color: #666; font-size: 14px;">
+                Preparing next question...
+            </div>
+        </div>
+    `;
+}
+
+function showQuestionSkipped() {
+    const transcript = document.getElementById("transcript");
+    
+    transcript.innerHTML = `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            animation: fadeIn 0.4s ease-in;
+        ">
+            <div style="
+                width: 70px;
+                height: 70px;
+                background: #FF9800;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 20px;
+                box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+            ">
+                <span style="font-size: 35px;">⏭️</span>
+            </div>
+            <div style="
+                color: #F57C00;
+                font-size: 20px;
+                font-weight: bold;
+                margin-bottom: 8px;
+            ">
+                Question Skipped
+            </div>
+            <div style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                Moving to next question...
+            </div>
+            <div style="
+                color: #999;
+                font-size: 12px;
+                padding: 8px 12px;
+                background: rgba(255, 152, 0, 0.1);
+                border-radius: 6px;
+            ">
+                Score: 0 points
+            </div>
+        </div>
+    `;
 }
 
 // ─── AUDIO HELPERS ───
@@ -1214,8 +1428,9 @@ async function playAudioBytes(arrayBuffer) {
     log("Playing TTS audio", "info");
     
     isAISpeaking = true;
-    muteMic();  // Mute mic during AI speech
-    submitBtn.disabled = true;  // Disable submit during AI speech
+    muteMic();
+    submitBtn.disabled = true;
+    skipBtn.disabled = true;
 
     try {
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -1236,8 +1451,9 @@ async function playAudioBytes(arrayBuffer) {
         isAISpeaking = false;
 
         if (isRunning) {
-            unmuteMic();  // Re-enable mic
-            submitBtn.disabled = false;  // Re-enable submit
+            unmuteMic();
+            submitBtn.disabled = false;
+            skipBtn.disabled = false;
             resetSilenceTimer();
         }
     }
@@ -1303,10 +1519,11 @@ function displayResults(summary) {
     transcript.textContent += "\n\n";
     
     transcript.textContent += "┌─────────────────────────────────────────────────────────────────┐\n";
-    transcript.textContent += "│                    QUESTION-WISE SCORES                         │\n";
+    transcript.textContent += "│                    INTERVIEW TRANSCRIPT                         │\n";
     transcript.textContent += "└─────────────────────────────────────────────────────────────────┘\n\n";
     
     summary.questions.forEach((question, index) => {
+        const answer = summary.answers[index] || "No answer";
         const score = summary.scores[index];
         const duration = summary.time_per_answer_seconds ? summary.time_per_answer_seconds[index] : 0;
         
@@ -1314,7 +1531,8 @@ function displayResults(summary) {
         const grade = getScoreGrade(score.final_score);
         
         transcript.textContent += `${emoji} Question ${index + 1}:\n`;
-        transcript.textContent += `   ${question}\n`;
+        transcript.textContent += `   Q: ${question}\n`;
+        transcript.textContent += `   A: ${answer}\n`;
         transcript.textContent += `   Score: ${score.final_score.toFixed(2)} (${grade}) | Time: ${Math.floor(duration)}s\n\n`;
     });
     
@@ -1366,6 +1584,7 @@ async function startInterview() {
     warned5Min = false;
     bufferWarningShown = false;
     inBufferTime = false;
+    currentQuestionNumber = 0;
 
     sessionId = await uploadResume();
     if (!sessionId) {
@@ -1375,9 +1594,43 @@ async function startInterview() {
     }
 
     const transcript = document.getElementById("transcript");
-    transcript.textContent = "Interview starting...\n";
+    transcript.innerHTML = `
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+        ">
+            <div style="
+                width: 80px;
+                height: 80px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 20px;
+                animation: pulse 2s infinite;
+            ">
+                <span style="font-size: 40px;">🚀</span>
+            </div>
+            <div style="font-size: 22px; font-weight: bold; color: #667eea; margin-bottom: 10px;">
+                Starting Interview
+            </div>
+            <div style="color: #666; font-size: 14px;">
+                Connecting...
+            </div>
+        </div>
+        <style>
+            @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+            }
+        </style>
+    `;
 
-    // Initialize audio FIRST
+    // Initialize audio
     try {
         log("Requesting microphone...", "info");
 
@@ -1402,7 +1655,7 @@ async function startInterview() {
         processor.connect(audioContext.destination);
         micEnabled = true;
 
-        log("Audio processing started (PCM16)", "success");
+        log("Audio processing started", "success");
 
     } catch (err) {
         log(`Microphone failed: ${err.message}`, "error");
@@ -1420,9 +1673,37 @@ async function startInterview() {
 
     ws.onopen = () => {
         log("WebSocket connected", "success");
-        transcript.textContent += "✅ Connected\n";
+        transcript.innerHTML = `
+            <div style="
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+            ">
+                <div style="
+                    width: 80px;
+                    height: 80px;
+                    background: #4CAF50;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin-bottom: 20px;
+                ">
+                    <span style="font-size: 40px; color: white;">✓</span>
+                </div>
+                <div style="font-size: 22px; font-weight: bold; color: #4CAF50; margin-bottom: 10px;">
+                    Connected!
+                </div>
+                <div style="color: #666; font-size: 14px;">
+                    Loading question...
+                </div>
+            </div>
+        `;
         stopBtn.disabled = false;
         submitBtn.disabled = false;
+        skipBtn.disabled = false;
     };
 
     ws.onmessage = async (event) => {
@@ -1435,53 +1716,51 @@ async function startInterview() {
 
             switch (data.type) {
                 case "TIMER_UPDATE":
-                    const newRemaining = data.remaining_seconds;
+                    remainingSeconds = data.remaining_seconds;
                     const nowInBuffer = data.in_buffer_time || false;
-                    
-                    // Sync timer from backend
-                    remainingSeconds = newRemaining;
 
-                    // Check buffer time transition
                     if (nowInBuffer && !inBufferTime) {
                         inBufferTime = true;
                         
                         if (!bufferWarningShown) {
                             bufferWarningShown = true;
-                            alert("⚠️ Main time expired! You have 2 minutes buffer time remaining.");
+                            alert("⚠️ Main time expired! Buffer time remaining.");
                             log("Entered buffer time", "warning");
                         }
                     }
                     
-                    // Update UI (timer keeps running)
                     updateTimerUI(remainingSeconds, inBufferTime);
                     
-                    // Start local countdown if not already running
                     if (!timerInterval) {
                         startLocalCountdown();
                     }
                     break;
 
                 case "BUFFER_TIME_WARNING":
-                    if (!bufferWarningShown && !inBufferTime) {
+                    if (!bufferWarningShown) {
                         inBufferTime = true;
                         bufferWarningShown = true;
                         alert(data.message);
-                        updateTimerUI(remainingSeconds, true);
-                        log("Entered buffer time", "warning");
                     }
                     break;
 
                 case "QUESTION":
-                    log(`Question received: ${data.text.substring(0, 50)}...`, "info");
-                    transcript.textContent += `\n❓ ${data.text}\n`;
-                    transcript.scrollTop = transcript.scrollHeight;
+                    currentQuestionNumber++;
+                    currentQuestion = data.text;
+                    
+                    log(`Question ${currentQuestionNumber} received`, "info");
+                    showCurrentQuestion(data.text, currentQuestionNumber);
                     resetSilenceTimer();
                     break;
 
                 case "FINAL_TRANSCRIPT":
-                    log(`Transcript: ${data.text.substring(0, 30)}...`, "info");
-                    transcript.textContent += `\n💬 You: ${data.text}\n`;
-                    transcript.scrollTop = transcript.scrollHeight;
+                    log(`Answer recorded`, "info");
+                    
+                    if (data.text.includes("skipped")) {
+                        showQuestionSkipped();
+                    } else {
+                        showAnswerRecorded();
+                    }
                     break;
 
                 case "END":
@@ -1497,16 +1776,10 @@ async function startInterview() {
                     break;
 
                 case "TTS_START":
-                    log("TTS started", "info");
-                    break;
-
                 case "TTS_END":
-                    log("TTS ended", "info");
                     break;
             }
         } else {
-            // Binary audio data
-            log(`← Audio: ${event.data.byteLength} bytes`, "info");
             await playAudioBytes(event.data);
         }
     };
@@ -1514,7 +1787,6 @@ async function startInterview() {
     ws.onerror = (error) => {
         log(`WebSocket error`, "error");
         console.error(error);
-        alert("Connection error. Check backend server.");
         stopInterview(false);
     };
 
@@ -1528,7 +1800,7 @@ async function startInterview() {
 
 // ─── STOP INTERVIEW ───
 function stopInterview(reset = true) {
-    log("Stopping interview...", "info");
+    log("Stopping...", "info");
     
     isRunning = false;
     stopTimer();
@@ -1550,6 +1822,7 @@ function stopInterview(reset = true) {
         startBtn.disabled = false;
         stopBtn.disabled = true;
         submitBtn.disabled = true;
+        skipBtn.disabled = true;
     }
 }
 
@@ -1557,11 +1830,21 @@ function stopInterview(reset = true) {
 function submitAnswer() {
     if (ws?.readyState === WebSocket.OPEN && isRunning) {
         log("→ Submitting answer", "info");
-        // Timer keeps running - no pause!
         ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
         clearTimeout(silenceTimeout);
     } else {
-        log(`Cannot submit: WS=${ws?.readyState}, running=${isRunning}`, "warning");
+        log(`Cannot submit: WS=${ws?.readyState}`, "warning");
+    }
+}
+
+// ─── SKIP QUESTION ───
+function skipQuestion() {
+    if (ws?.readyState === WebSocket.OPEN && isRunning) {
+        log("→ Skipping question", "warning");
+        ws.send(JSON.stringify({ action: "SKIP_QUESTION" }));
+        clearTimeout(silenceTimeout);
+    } else {
+        log(`Cannot skip: WS=${ws?.readyState}`, "warning");
     }
 }
 
@@ -1582,4 +1865,9 @@ submitBtn.addEventListener("click", (e) => {
     submitAnswer();
 });
 
-log("Audio.js loaded successfully", "success");
+skipBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    skipQuestion();
+});
+
+log("Audio.js loaded", "success");

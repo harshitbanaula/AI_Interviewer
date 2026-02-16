@@ -262,8 +262,7 @@
         
 #         if socket_open and not end_sent:
 #             await send_end_and_close()
-
-# backend/app/routers/ws.py - FULLY CONTINUOUS TIMER (NO PAUSES)
+# backend/app/routers/ws.py - WITH SKIP QUESTION SUPPORT
 
 import time
 import json
@@ -286,7 +285,6 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         await ws.close()
         return
 
-    # Timer starts when first question is sent
     socket_open = True
     end_sent = False
     buffer_warning_sent = False
@@ -314,7 +312,6 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         if end_sent or not socket_open:
             return
 
-        # Handle pending audio
         if not session.completed:
             if session.expecting_answer and audio_buffer:
                 try:
@@ -352,7 +349,6 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         if session.completed or not socket_open:
             return
 
-        # Calculate elapsed time (simple wall clock time)
         elapsed = time.time() - session.session_start_time
         
         if elapsed < session.SESSION_LIMIT_SECONDS:
@@ -375,14 +371,12 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
             "text": q
         })
 
-        # Generate and send TTS (timer continues)
         audio = synthesize_speech(q, speaker_id=0, speed=0.85)
         if audio and socket_open:
             await safe_send_json({"type": "TTS_START"})
             await safe_send_bytes(audio)
             await safe_send_json({"type": "TTS_END"})
 
-    # Background time monitor - continuous timer
     async def monitor_time_limit():
         nonlocal buffer_warning_sent
         
@@ -392,7 +386,6 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
             if not session.session_start_time:
                 continue
             
-            # Simple elapsed time calculation - no pauses
             elapsed = time.time() - session.session_start_time
             
             if elapsed < session.SESSION_LIMIT_SECONDS:
@@ -413,7 +406,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 print(f"[SESSION {session_id}] Main time expired, entering buffer time")
                 await safe_send_json({
                     "type": "BUFFER_TIME_WARNING",
-                    "message": " Main time expired! You have 2 minutes buffer time remaining."
+                    "message": "⚠️ Main time expired! You have 2 minutes buffer time remaining."
                 })
                 buffer_warning_sent = True
             
@@ -424,25 +417,19 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
 
     time_monitor_task = asyncio.create_task(monitor_time_limit())
 
-    
-    # FIRST QUESTION
-    
+    # First question - start timer
     first_q = session.next_question()
     
     if first_q:
-        # START TIMER when first question is ready
         session.session_start_time = time.time()
-        print(f"[SESSION {session_id}] Timer started at {session.session_start_time}")
-        
+        print(f"[SESSION {session_id}] ⏱️  Timer started")
         await send_question(first_q)
     else:
         await send_end_and_close()
         time_monitor_task.cancel()
         return
 
-    
-    # MAIN LOOP
-
+    # Main loop
     try:
         while socket_open:
             msg = await ws.receive()
@@ -461,11 +448,14 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                     payload = json.loads(msg["text"])
                     action = payload.get("action")
 
+                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    # SUBMIT ANSWER
+                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                     if action == "SUBMIT_ANSWER":
                         if not session.expecting_answer:
                             continue
                         
-                        # Save audio and transcribe (timer continues)
+                        # Save audio and transcribe
                         if audio_buffer:
                             current_q_idx = len(session.answers) + 1
                             save_candidate_audio(session_id, current_q_idx, bytes(audio_buffer))
@@ -476,7 +466,6 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
 
                         print(f"[SESSION {session_id}] Answer: {answer_text[:50]}...")
 
-                        # Save answer (timer continues)
                         session.save_answer(answer_text)
 
                         await safe_send_json({
@@ -489,11 +478,46 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                             await send_end_and_close()
                             break
 
-                        # Generate next question (timer continues)
                         next_q = session.next_question()
                         
                         if next_q:
                             print(f"[SESSION {session_id}] Sending next question")
+                            await send_question(next_q)
+                        else:
+                            print(f"[SESSION {session_id}] No more questions")
+                            await send_end_and_close()
+                            break
+
+                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    # SKIP QUESTION (NEW)
+                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    elif action == "SKIP_QUESTION":
+                        if not session.expecting_answer:
+                            continue
+                        
+                        print(f"[SESSION {session_id}] Question skipped by candidate")
+                        
+                        # Clear any buffered audio
+                        if audio_buffer:
+                            audio_buffer.clear()
+                        
+                        # Save as skipped
+                        session.save_answer("Question skipped by candidate")
+
+                        await safe_send_json({
+                            "type": "FINAL_TRANSCRIPT",
+                            "text": "⏭️ Question skipped"
+                        })
+
+                        if session.completed:
+                            print(f"[SESSION {session_id}] Interview completed")
+                            await send_end_and_close()
+                            break
+
+                        next_q = session.next_question()
+                        
+                        if next_q:
+                            print(f"[SESSION {session_id}] Sending next question after skip")
                             await send_question(next_q)
                         else:
                             print(f"[SESSION {session_id}] No more questions")
