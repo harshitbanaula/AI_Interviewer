@@ -48,15 +48,22 @@ inference_prompt = ChatPromptTemplate.from_messages([
 
 chain = inference_prompt | llm | StrOutputParser()
 
-
-def infer_job_description(resume_text: str) ->str:
-
+def infer_job_description(resume_text: str) -> str:
     try:
         truncated_text = resume_text[:3000]
+        result = chain.invoke({"resume_text": truncated_text})
+        result = result.strip()
 
-        result = chain.invoke({"resume_text" : truncated_text})
-        return result.strip()
+        lines = [line.strip() for line in result.split("\n") if line.strip()]
+        for line in lines:
+            
+            if line.startswith("#") or line.lower().startswith("this job") or line.lower().startswith("the short"):
+                continue
+            if " - " in line:
+                return line
+        
+        return lines[0] if lines else "Software Engineer"
+
     except Exception as e:
-        print(f" Error inferring job description : {e}")
+        print(f"Error inferring job description: {e}")
         return "Software Engineer"
-

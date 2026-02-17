@@ -7,7 +7,7 @@ import os
 load_dotenv()
 
 # Database
-DB_URL = os.getenv("DB_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Hugging Face LLM
 HF_TOKEN = os.getenv("HF_TOKEN")
