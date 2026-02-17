@@ -58,5 +58,5 @@ def infer_job_description(resume_text: str) ->str:
         return result.strip()
     except Exception as e:
         print(f" Error inferring job description : {e}")
-        return "Sogtware Engineer"
+        return "Software Engineer"
 

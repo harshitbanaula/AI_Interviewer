@@ -837,17 +837,26 @@
 #         return _sessions.get(session_id)
 
 
-# backend/app/services/interview_state.py - CONTINUOUS TIMER (NO PAUSES)
+
+
+
+# backend/app/services/interview_state.py
+# FIX #4 - RACE CONDITION with threading lock on state mutations
 
 import uuid
 import time
+import threading
 from typing import Dict, List, Optional
 
 from app.services.question_generator import generate_question
 from app.services.evaluator import score_answer
 from app.services.llm_feedback import generate_feedback
 
-import threading
+
+# ─── SESSION TTL CONFIGURATION (Fix #1) ───
+SESSION_TTL_SECONDS = 2 * 60 * 60
+COMPLETED_TTL_SECONDS = 30 * 60
+CLEANUP_INTERVAL_SECONDS = 15 * 60
 
 
 class InterviewSession:
@@ -875,19 +884,31 @@ class InterviewSession:
         self.current_topic: Optional[str] = None
         self.topic_weakness: Dict[str, int] = {}
 
-        # Timer starts when first question is sent (set in WebSocket)
         self.session_start_time: Optional[float] = None
-        
+
+        # Fix #1 - TTL tracking
+        self.created_at: float = time.time()
+        self.completed_at: Optional[float] = None
+
         self.current_question_start: Optional[float] = None
         self.answer_durations: List[float] = []
 
         self.feedback_text: str = ""
         self.in_buffer_time = False
 
-    # ─── TIME CALCULATION (SIMPLE) ───
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # FIX #4 - Single lock protecting ALL state mutations
+        # Prevents race condition between:
+        #   - save_answer() called from WebSocket receive
+        #   - next_question() called right after
+        #   - _finalize_interview() called from time monitor
+        #   - monitor_time_limit() running in background task
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        self._state_lock = threading.Lock()
+
+    # ─── TIME CALCULATION ───
 
     def get_elapsed_time(self) -> float:
-        """Simple elapsed time - no pauses"""
         if not self.session_start_time:
             return 0.0
         return time.time() - self.session_start_time
@@ -906,31 +927,26 @@ class InterviewSession:
     def _finalize_interview(self, force_save_current_answer: bool = False):
         if self.completed:
             return
-        
+
         self.completed = True
         self.expecting_answer = False
+        self.completed_at = time.time()  # Fix #1
 
-        # If user was mid-answer
         if force_save_current_answer and len(self.questions) > len(self.answers):
             current_question = self.questions[-1]
             self.answers.append("Answer not completed (time expired)")
 
-            if self.current_question_start:
-                duration = time.time() - self.current_question_start
-            else:
-                duration = 0.0
-            
-            self.answer_durations.append(round(max(duration, 0), 2))
+            duration = round(max(time.time() - self.current_question_start, 0), 2) \
+                if self.current_question_start else 0.0
+            self.answer_durations.append(duration)
 
             score = score_answer(
                 "Answer not completed (time expired)",
                 current_question
             )
             self.scores.append(score)
-        
-        self.current_question_start = None
 
-        # Generate feedback
+        self.current_question_start = None
         self.generate_feedback()
 
     # ─── HELPERS ───
@@ -966,7 +982,6 @@ class InterviewSession:
         return "TECH_SWITCH" if self.topic_weakness[topic] >= 2 else "TECH_SIMPLIFY"
 
     def _generate_unique_question(self, stage: str) -> str:
-        """Generate question - timer continues running"""
         for _ in range(self.MAX_RETRY):
             result = generate_question(
                 job_description=self.job_description,
@@ -984,127 +999,132 @@ class InterviewSession:
 
         return "Can you explain a technical decision you made recently?"
 
-    # ─── INTERVIEW FLOW ───
+    # ─── INTERVIEW FLOW (PUBLIC - LOCK ACQUIRED HERE) ───
 
     def next_question(self) -> Optional[str]:
-        """Generate next question - timer continues"""
-        
-        # Check buffer time expiration
-        if self._buffer_time_exceeded():
-            self._finalize_interview(force_save_current_answer=True)
-            return None
 
-        # Already completed
-        if self.completed:
-            return None
+        # ── LOCKED: check state ──
+        with self._state_lock:
 
-        # Check if main time exceeded
-        if self._main_time_exceeded() and not self.in_buffer_time:
-            self.in_buffer_time = True
-            print(f"[INTERVIEW] Entered buffer time (2 minutes remaining)")
+            if self._buffer_time_exceeded():
+                self._finalize_interview(force_save_current_answer=True)
+                return None
 
-        # Don't allow new question if waiting for answer
-        if self.expecting_answer:
-            return None
+            if self.completed:
+                return None
 
-        # Check if question limit reached
-        if self._question_limit_reached():
-            self._finalize_interview()
-            return None
+            if self._main_time_exceeded() and not self.in_buffer_time:
+                self.in_buffer_time = True
+                print(f"[INTERVIEW] Entered buffer time")
 
-        self.expecting_answer = True
+            if self.expecting_answer:
+                return None
 
-        # Generate question (timer continues)
-        if self.stage == "INTRO":
+            if self._question_limit_reached():
+                self._finalize_interview()
+                return None
+
+            # Reserve slot - prevent double question generation
+            self.expecting_answer = True
+
+            # Capture stage for LLM call outside lock
+            current_stage = self.stage
+            is_intro = current_stage == "INTRO"
+
+            if is_intro:
+                self.stage = "TECH_SWITCH"
+
+        # ── UNLOCKED: LLM call (slow, don't block) ──
+        if is_intro:
             q = "Please briefly introduce yourself and your professional background."
-            self.stage = "TECH_SWITCH"
         else:
-            q = self._generate_unique_question(self.stage)
+            q = self._generate_unique_question(current_stage)
 
-        self.questions.append(q)
-        self.current_topic = self._detect_topic(q)
-        self.current_question_start = time.time()
-        
+        # ── LOCKED: write result back to state ──
+        with self._state_lock:
+            # Safety check - interview might have ended during LLM call
+            if self.completed:
+                self.expecting_answer = False
+                return None
+
+            self.questions.append(q)
+            self.current_topic = self._detect_topic(q)
+            self.current_question_start = time.time()
+
         return q
 
     def save_answer(self, answer: str):
-        """Save answer - timer continues"""
-        if self.completed or not self.expecting_answer:
-            return
+        
+        with self._state_lock:
 
-        # Check if buffer time expired
-        if self._buffer_time_exceeded():
-            self._finalize_interview(force_save_current_answer=False)
-            return
+            if self.completed or not self.expecting_answer:
+                return
 
-        answer_text = answer.strip() or "No answer provided"
-        question = self.questions[-1]
+            if self._buffer_time_exceeded():
+                self._finalize_interview(force_save_current_answer=False)
+                return
 
-        # Track duration
-        if self.current_question_start:
-            self.answer_durations.append(
-                round(time.time() - self.current_question_start, 2)
-            )
-        else:
-            self.answer_durations.append(0.0)
+            answer_text = answer.strip() or "No answer provided"
+            question = self.questions[-1]
 
-        self.current_question_start = None
+            duration = round(time.time() - self.current_question_start, 2) \
+                if self.current_question_start else 0.0
+            self.answer_durations.append(duration)
 
-        # Score answer
-        score = score_answer(answer_text, question)
+            self.current_question_start = None
 
-        self.answers.append(answer_text)
-        self.scores.append(score)
+            # Score answer
+            score = score_answer(answer_text, question)
 
-        # Adaptive logic
-        classification = self._classify_answer(score["final_score"])
-        self.stage = self._decide_next_stage(self.current_topic, classification)
+            self.answers.append(answer_text)
+            self.scores.append(score)
 
-        self.expecting_answer = False
+            classification = self._classify_answer(score["final_score"])
+            self.stage = self._decide_next_stage(self.current_topic, classification)
+
+            self.expecting_answer = False
+
+    def force_finalize(self):
+        with self._state_lock:
+            self._finalize_interview(force_save_current_answer=True)
 
     # ─── FEEDBACK & RESULT ───
- 
+
     def generate_feedback(self):
-        """Generate feedback - timer continues (or interview is over)"""
         qa_list = []
         for i, q in enumerate(self.questions):
             ans = self.answers[i] if i < len(self.answers) else "No answer provided"
             sc = self.scores[i] if i < len(self.scores) else score_answer(ans, q)
             qa_list.append({"question": q, "answer": ans, "scores": sc})
 
-        if self.scores:
-            avg_score = round(
-                sum(s["final_score"] for s in self.scores) / len(self.scores), 2
-            )
-        else:
-            avg_score = 0.0
+        avg_score = round(
+            sum(s["final_score"] for s in self.scores) / len(self.scores), 2
+        ) if self.scores else 0.0
 
         self.feedback_text = generate_feedback(qa_list, avg_score)
 
     def final_result(self) -> dict:
-        total_time = round(self.get_elapsed_time(), 2)
-        
-        if self.scores:
+        with self._state_lock:
+            total_time = round(self.get_elapsed_time(), 2)
+
             avg_score = round(
                 sum(s["final_score"] for s in self.scores) / len(self.scores), 2
-            )
-        else:
-            avg_score = 0.0
+            ) if self.scores else 0.0
 
-        return {
-            "average_score": avg_score,
-            "result": "PASS" if avg_score >= 0.7 else "FAIL",
-            "total_duration_seconds": total_time,
-            "time_per_answer_seconds": self.answer_durations,
-            "questions": self.questions,
-            "answers": self.answers,
-            "scores": self.scores,
-            "feedback": self.feedback_text,
-            "covered_projects": self.covered_projects,
-            "completion_reason": self._get_completion_reason(),
-            "questions_answered": len(self.answers),
-            "questions_asked": len(self.questions)
-        }
+            return {
+                "average_score": avg_score,
+                "result": "PASS" if avg_score >= 0.7 else "FAIL",
+                "total_duration_seconds": total_time,
+                "time_per_answer_seconds": self.answer_durations,
+                "questions": self.questions,
+                "answers": self.answers,
+                "scores": self.scores,
+                "feedback": self.feedback_text,
+                "covered_projects": self.covered_projects,
+                "completion_reason": self._get_completion_reason(),
+                "questions_answered": len(self.answers),
+                "questions_asked": len(self.questions)
+            }
 
     def _get_completion_reason(self) -> str:
         if self._buffer_time_exceeded():
@@ -1115,10 +1135,46 @@ class InterviewSession:
             return "COMPLETED_NORMALLY"
 
 
-# ─── SESSION STORE ───
+
+# SESSION STORE WITH AUTO-CLEANUP (Fix #1)
+
 
 _sessions: Dict[str, InterviewSession] = {}
 _sessions_lock = threading.Lock()
+
+
+def _cleanup_expired_sessions():
+    while True:
+        time.sleep(CLEANUP_INTERVAL_SECONDS)
+
+        now = time.time()
+        expired_ids = []
+
+        with _sessions_lock:
+            for session_id, session in _sessions.items():
+                if session.completed and session.completed_at:
+                    if now - session.completed_at > COMPLETED_TTL_SECONDS:
+                        expired_ids.append(session_id)
+                        print(f"[CLEANUP] Removing completed session {session_id}")
+                else:
+                    if now - session.created_at > SESSION_TTL_SECONDS:
+                        expired_ids.append(session_id)
+                        print(f"[CLEANUP] Removing abandoned session {session_id}")
+
+            for session_id in expired_ids:
+                del _sessions[session_id]
+
+        if expired_ids:
+            print(f"[CLEANUP] Removed {len(expired_ids)} sessions. Active: {len(_sessions)}")
+
+
+_cleanup_thread = threading.Thread(
+    target=_cleanup_expired_sessions,
+    daemon=True,
+    name="SessionCleanup"
+)
+_cleanup_thread.start()
+print("[SESSION STORE] Auto-cleanup thread started")
 
 
 def create_session(session_id: str, job_description: str, resume_text: str) -> str:
@@ -1127,9 +1183,22 @@ def create_session(session_id: str, job_description: str, resume_text: str) -> s
             resume_text=resume_text,
             job_description=job_description
         )
+    print(f"[SESSION STORE] Created {session_id}. Total active: {len(_sessions)}")
     return session_id
 
 
 def get_session(session_id: str) -> Optional[InterviewSession]:
     with _sessions_lock:
         return _sessions.get(session_id)
+
+
+def delete_session(session_id: str):
+    with _sessions_lock:
+        if session_id in _sessions:
+            del _sessions[session_id]
+            print(f"[SESSION STORE] Deleted {session_id}. Total active: {len(_sessions)}")
+
+
+def get_active_session_count() -> int:
+    with _sessions_lock:
+        return len(_sessions)

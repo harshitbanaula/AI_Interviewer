@@ -262,6 +262,9 @@
         
 #         if socket_open and not end_sent:
 #             await send_end_and_close()
+
+
+
 # backend/app/routers/ws.py - WITH SKIP QUESTION SUPPORT
 
 import time
@@ -269,7 +272,7 @@ import json
 import asyncio
 from fastapi import APIRouter, WebSocket, Query, WebSocketDisconnect
 from app.services.stt import transcribe_chunk
-from app.services.interview_state import get_session
+from app.services.interview_state import get_session,delete_session
 from app.services.tts import synthesize_speech
 from app.services.audio_storage import save_candidate_audio
 
@@ -343,6 +346,8 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         socket_open = False
         await asyncio.sleep(0.5)
         await ws.close()
+
+        delete_session(session_id)  # Clean up session after interview ends
 
     async def send_question(q: str):
         """Send question - timer continues running throughout"""
@@ -448,9 +453,9 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                     payload = json.loads(msg["text"])
                     action = payload.get("action")
 
-                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    
                     # SUBMIT ANSWER
-                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    
                     if action == "SUBMIT_ANSWER":
                         if not session.expecting_answer:
                             continue
@@ -488,9 +493,8 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                             await send_end_and_close()
                             break
 
-                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                     # SKIP QUESTION (NEW)
-                    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    
                     elif action == "SKIP_QUESTION":
                         if not session.expecting_answer:
                             continue
