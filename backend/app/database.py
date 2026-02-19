@@ -1,7 +1,7 @@
 # backend/app/databse.py
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker,DeclarativeBase
+from sqlalchemy import create_engine,Index,ForeignKey
+from sqlalchemy.orm import sessionmaker,DeclarativeBase,relationship
 from sqlalchemy import (
     Column,String,Float,Integer,
     Boolean, DateTime, Text ,JSON
@@ -43,6 +43,10 @@ class InterviewSessionModel(Base):
     session_id = Column(String, primary_key=True, index = True)
     job_description = Column(Text, nullable=False)
 
+    candidate_name = Column(String, nullable=True)
+    candidate_email = Column(String, nullable=True)
+    resume_text = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
@@ -59,11 +63,17 @@ class InterviewSessionModel(Base):
     covered_projects = Column(JSON, nullable=True)
     feedback = Column(Text, nullable=True)
 
+    answers = relationship(
+        "InterviewAnswerModel",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        lazy="select"
+    )
 
 class InterviewAnswerModel(Base):
     __tablename__ = "interview_answers"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String, nullable=False, index=True)
+    session_id = Column(String, ForeignKey("interview_sessions.session_id",ondelete="CASCADE"), nullable=False,index = True)
 
     question_index = Column(Integer, nullable=False)
     question_text = Column(Text, nullable=False)
@@ -79,15 +89,25 @@ class InterviewAnswerModel(Base):
     semantic_correctness = Column(Float, nullable=True)
     reasoning_quality = Column(Float, nullable=True)
     clarity = Column(Float, nullable=True)
-
     final_score = Column(Float, nullable=True)
+
 
     strengths = Column(JSON, default=list)
     improvements = Column(JSON, default=list)
 
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     answered_at = Column(DateTime, default=datetime.utcnow)
 
+    session = relationship("InterviewSessionModel", back_populates="answers")
 
+    __table_args__=(
+        Index("idx_session_question", "session_id", "question_index"),
+        # Query: SELECT * FROM answers WHERE session_id=X ORDER BY question_index
+        # Without index: O(n log n) table scan
+        # With index: O(log n) index lookup
+    )
 # create all tables
 
 def init_db():

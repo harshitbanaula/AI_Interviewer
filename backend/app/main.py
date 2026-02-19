@@ -281,6 +281,7 @@ from app.services.job_inference import infer_job_description
 from app.repository import db_create_session
 from uuid import uuid4
 from dotenv import load_dotenv
+import re
 
 load_dotenv()
 
@@ -304,6 +305,47 @@ from app.routers.ws import router as ws_router
 app.include_router(ws_router)
 
 
+def extract_candidate_name(resume_text: str) -> str:
+    lines = [line.strip() for line in resume_text.split("\n") if line.strip()]
+    
+    if not lines:
+        return "Unknown Candidate"
+    
+    # Try first non-empty line
+    first_line = lines[0]
+    
+    # Check if it looks like a name (2-4 capitalized words, no special chars)
+    name_pattern = r'^([A-Z][a-z]+(?: [A-Z][a-z]+){1,3})$'
+    if re.match(name_pattern, first_line):
+        return first_line
+    
+    # Fallback: look for "Name:" pattern
+    for line in lines[:5]:
+        if line.lower().startswith("name:"):
+            name = line.split(":", 1)[1].strip()
+            if name:
+                return name
+    
+    # Last resort: take first 2-3 capitalized words from first line
+    words = first_line.split()
+    name_words = []
+    for word in words[:3]:
+        if word and word[0].isupper():
+            name_words.append(word)
+        else:
+            break
+    
+    return " ".join(name_words) if name_words else "Unknown Candidate"
+
+
+def extract_candidate_email(resume_text: str) -> str:
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    matches = re.findall(email_pattern, resume_text)
+    return matches[0] if matches else None
+
+
+
+
 @app.get("/")
 def health():
     return {
@@ -316,7 +358,6 @@ def health():
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     
-    # ── Validate file ──
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
@@ -347,6 +388,13 @@ async def upload_resume(file: UploadFile = File(...)):
     if not resume_text or len(resume_text.strip()) < 50:
         raise HTTPException(status_code=400, detail="Resume content too short or unreadable")
 
+
+    # ── Extract candidate info ──
+    candidate_name = extract_candidate_name(resume_text)
+    candidate_email = extract_candidate_email(resume_text)
+    print(f"Candidate: {candidate_name}, Email: {candidate_email or 'Not found'}")
+
+
     # ── Infer job description ──
     try:
         job_description = infer_job_description(resume_text)
@@ -363,21 +411,33 @@ async def upload_resume(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
 
-    # ── Create session in DB ──
+    # ── Create session in DB with candidate data ──
     try:
         db = SessionLocal()
-        db_create_session(db, session_id, job_description)
+        success = db_create_session(
+            db=db,
+            session_id=session_id,
+            job_description=job_description,
+            resume_text=resume_text,
+            candidate_name=candidate_name,
+            candidate_email=candidate_email
+        )
         db.close()
-        print(f" DB session created: {session_id}")
+        
+        if success:
+            print(f"DB session created: {session_id}")
+        else:
+            print(f"DB session creation failed (non-critical)")
+            
     except Exception as e:
-        print(f" DB session creation failed (non-critical): {e}")
-        # Non-critical - interview can still proceed without DB
+        print(f"DB error (non-critical): {e}")
 
     return JSONResponse(
         status_code=201,
         content={
             "session_id": session_id,
             "job_description": job_description,
+            "candidate_name": candidate_name,
             "status": "success",
             "message": "Resume uploaded successfully"
         }

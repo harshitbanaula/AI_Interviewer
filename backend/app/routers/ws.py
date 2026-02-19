@@ -569,7 +569,6 @@ router = APIRouter()
 
 
 def get_db_session() -> Session:
-    """Get a new DB session for WebSocket handler"""
     return SessionLocal()
 
 
@@ -666,10 +665,6 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         audio_path: str,
         is_skipped: bool
     ):
-        """
-        Helper to save answer to DB.
-        Reads scores and question from session state.
-        """
         try:
             # Get the score that was just saved to session
             score = session.scores[-1] if session.scores else {}
@@ -678,7 +673,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
             duration = session.answer_durations[-1] \
                 if session.answer_durations else 0.0
 
-            db_save_answer(
+            success = db_save_answer(
                 db=db,
                 session_id=session_id,
                 question_index=question_index,
@@ -691,6 +686,11 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 project_mentioned=session.current_topic,
                 is_skipped=is_skipped
             )
+
+            if not success:
+                print(f"[DB ERROR] Failed to save answer for Q{question_index}")
+                
+
         except Exception as e:
             print(f"[DB ERROR] save_answer Q{question_index}: {e}")
 
