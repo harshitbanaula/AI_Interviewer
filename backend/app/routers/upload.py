@@ -1,31 +1,3 @@
-# # backend/app/routers/upload_resume.py
-# from fastapi import APIRouter, UploadFile, Form
-# import shutil
-# from app.services.resume_parser import parse_resume
-# from app.services.interview_state import InterviewSession
-
-# router = APIRouter()
-
-# # In-memory session storage (for demo, use DB in production)
-# sessions = {}
-
-# @router.post("/upload_resume")
-# async def upload_resume(resume: UploadFile, job_description: str = Form(...)):
-#     # Save uploaded file temporarily
-#     file_location = f"temp_resumes/{resume.filename}"
-#     with open(file_location, "wb") as f:
-#         shutil.copyfileobj(resume.file, f)
-
-#     # Parse resume
-#     resume_text = parse_resume(file_location)
-
-#     # Create InterviewSession
-#     session = InterviewSession(job_description, resume_text)
-#     sessions[session.session_id] = session
-
-#     return {"session_id": session.session_id}
-
-
 import os
 import uuid
 import tempfile
