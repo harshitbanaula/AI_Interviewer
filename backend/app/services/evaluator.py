@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
+import signal
+from contextlib import contextmanager
+import time 
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -369,6 +371,36 @@ def test_consistency(question: str, answer: str, runs: int = 5) -> dict:
         "std_dev": round(std_dev, 3),
         "scores": scores,
         "consistent": consistent
+    }
+
+
+# In evaluator.py — add timeout to chain.invoke
+
+def call_llm_with_retry(question: str, answer: str, max_retries: int = 3) -> dict:
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Add timeout — don't wait more than 10s per attempt
+            raw = chain.invoke(
+                {"question": question, "answer": answer},
+                config={"timeout": 10}   # ← ADD THIS
+            )
+            parsed = parse_llm_response(raw.strip(), attempt)
+            if parsed:
+                required = ["relevance", "technical_accuracy", "completeness", "clarity"]
+                if all(k in parsed for k in required):
+                    return parsed
+        except Exception as e:
+            print(f"[EVALUATOR] Attempt {attempt} failed: {e}")
+            if attempt < max_retries:
+                time.sleep(0.5)  # brief backoff before retry
+
+    print(f"[EVALUATOR] All retries failed, using fallback")
+    return {
+        "relevance": 0.5, "technical_accuracy": 0.5,
+        "completeness": 0.5, "clarity": 0.5,
+        "final_score": 0.5, "strengths": [],
+        "improvements": ["Automatic evaluation failed - requires manual review"],
+        "is_non_answer": False
     }
 
 
