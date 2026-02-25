@@ -32,3 +32,7 @@ torchaudio
 soundfile 
 numpy
 phonemizer
+
+# move session state to redis 
+redis
+hiredis
