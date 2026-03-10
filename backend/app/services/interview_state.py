@@ -38,7 +38,6 @@ def _key(session_id: str) -> str:
 # ─── SERIALIZATION HELPERS ───
 
 def _serialize_session(session: "InterviewSession") -> str:
-    """Convert session to JSON string for Redis storage."""
     data = {
         "resume_text":            session.resume_text,
         "job_description":        session.job_description,
@@ -65,7 +64,6 @@ def _serialize_session(session: "InterviewSession") -> str:
 
 
 def _deserialize_session(raw: str) -> "InterviewSession":
-    """Reconstruct InterviewSession from JSON string."""
     data = json.loads(raw)
     session = InterviewSession.__new__(InterviewSession)
 
@@ -101,7 +99,6 @@ def _deserialize_session(raw: str) -> "InterviewSession":
 # ─── REDIS SESSION STORE ───
 
 def _load_session(session_id: str) -> Optional["InterviewSession"]:
-    """Load session from Redis. Returns None if not found."""
     try:
         raw = _redis_client.get(_key(session_id))
         if raw is None:
@@ -113,7 +110,6 @@ def _load_session(session_id: str) -> Optional["InterviewSession"]:
 
 
 def _save_session(session_id: str, session: "InterviewSession"):
-    """Persist session state to Redis with appropriate TTL."""
     try:
         raw = _serialize_session(session)
         ttl = COMPLETED_TTL_SECONDS if session.completed else SESSION_TTL_SECONDS
@@ -123,7 +119,6 @@ def _save_session(session_id: str, session: "InterviewSession"):
 
 
 def _delete_session_key(session_id: str):
-    """Remove session from Redis."""
     try:
         _redis_client.delete(_key(session_id))
     except Exception as e:
