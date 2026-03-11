@@ -11,6 +11,8 @@ from app.repository import db_create_session
 from uuid import uuid4
 from dotenv import load_dotenv
 import re
+from app.routers.ws import router as ws_router
+from app.routers import finalize
 
 load_dotenv()
 
@@ -30,8 +32,9 @@ def startup():
     init_db()
     print("[STARTUP] Database initialized")
 
-from app.routers.ws import router as ws_router
 app.include_router(ws_router)
+
+app.include_router(finalize.router)
 
 
 def extract_candidate_name(resume_text: str) -> str:
