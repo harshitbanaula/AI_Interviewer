@@ -1,6 +1,5 @@
 // CONSTANTS
 
-
 const WS_URL_BASE       = "ws://localhost:8000/ws/interview";
 const API_URL_BASE      = "http://localhost:8000";
 const STORAGE_KEY       = "ai_interview_session";
@@ -10,9 +9,8 @@ const RECONNECT_FAST_MS = 2_000;
 const RECONNECT_PROC_MS = 6_000;
 const MAX_RECONNECT     = 5;
 
-// STATE
-
-
+ // STATE
+ 
 let sessionId      = null;
 let interviewEnded = false;
 let isDiscarding   = false;
@@ -27,7 +25,7 @@ let processor    = null;
 let source       = null;
 let stream       = null;
 let isRunning    = false;
-let micEnabled   = false;   
+let micEnabled   = false;
 let isAISpeaking = false;
 
 let isProcessing     = false;
@@ -45,22 +43,32 @@ let bufferWarningShown = false;
 let currentQuestionNumber = 0;
 let currentQuestion       = null;
 
-// UI ELEMENT REFS
-
+ // UI ELEMENT REFS
+ 
 const resumeInput = document.getElementById("resumeFile");
 const startBtn    = document.getElementById("startBtn");
 const stopBtn     = document.getElementById("stopBtn");
 const submitBtn   = document.getElementById("submitBtn");
 const skipBtn     = document.getElementById("skipBtn");
 
-// LOGGING
-
+ // LOGGING
 
 function log(message, type = "info") {
     const prefix = { info: "ℹ️", success: "✅", error: "❌", warning: "⚠️" }[type] || "ℹ️";
     console.log(`[${new Date().toLocaleTimeString()}] ${prefix} ${message}`);
 }
 
+// BEFOREUNLOAD WARNING
+
+window.addEventListener("beforeunload", (e) => {
+    if (isRunning && !interviewEnded) {
+        // Standard way to trigger the native browser warning dialog.
+        // returnValue must be set for older browsers; preventDefault for modern ones.
+        e.preventDefault();
+        e.returnValue = "Your interview is in progress. If you leave, your progress will be saved and you can resume later.";
+        return e.returnValue;
+    }
+});
 
 // LOCAL-STORAGE HELPERS
 
@@ -86,6 +94,7 @@ function loadSessionFromStorage() {
 function clearSessionFromStorage() {
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* non-fatal */ }
 }
+
 
 // TIMER HELPERS
 
@@ -171,6 +180,7 @@ function showToast(message, type = "info") {
 
 // RESUME BANNER
 
+
 function showResumeBanner(interruptedSessionId) {
     document.getElementById("resume-banner")?.remove();
 
@@ -178,43 +188,75 @@ function showResumeBanner(interruptedSessionId) {
     banner.id = "resume-banner";
     banner.style.cssText = `
         position:fixed;top:0;left:0;right:0;z-index:10000;
-        background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
-        color:white;padding:16px 24px;
+        background:linear-gradient(135deg,#1e3a5f 0%,#2d6a4f 100%);
+        color:white;padding:18px 28px;
         display:flex;align-items:center;justify-content:space-between;
-        box-shadow:0 4px 20px rgba(0,0,0,0.3);`;
+        box-shadow:0 4px 24px rgba(0,0,0,0.4);flex-wrap:wrap;gap:12px;`;
 
     banner.innerHTML = `
-        <div style="display:flex;align-items:center;gap:12px;">
-            <span style="font-size:24px;">🔄</span>
+        <div style="display:flex;align-items:center;gap:14px;">
+            <span style="font-size:28px;">🔄</span>
             <div>
-                <div style="font-weight:700;font-size:16px;">Interview In Progress</div>
-                <div style="font-size:13px;opacity:0.9;">You were disconnected. Would you like to resume?</div>
+                <div style="font-weight:700;font-size:16px;margin-bottom:2px;">
+                    Interview In Progress
+                </div>
+                <div style="font-size:12px;opacity:0.85;">
+                    You were disconnected. Your progress is saved — what would you like to do?
+                </div>
             </div>
         </div>
-        <div style="display:flex;gap:10px;">
-            <button id="resume-btn" style="
-                background:white;color:#667eea;border:none;padding:10px 20px;
-                border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">
-                ▶ Resume Interview
+
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+
+            <div style="display:flex;gap:10px;">
+                <!-- Resume Button -->
+                <button id="resume-btn" style="
+                    background:#22c55e;color:white;border:none;
+                    padding:10px 20px;border-radius:8px;
+                    font-weight:700;font-size:14px;cursor:pointer;
+                    box-shadow:0 2px 8px rgba(34,197,94,0.4);
+                    transition:opacity 0.2s;">
+                    ▶ Resume Interview
+                </button>
+
+                <!-- Submit Button -->
+                <button id="submit-interrupted-btn" style="
+                    background:#f59e0b;color:white;border:none;
+                    padding:10px 20px;border-radius:8px;
+                    font-weight:700;font-size:14px;cursor:pointer;
+                    box-shadow:0 2px 8px rgba(245,158,11,0.4);
+                    transition:opacity 0.2s;">
+                    🏁 Submit Interview
+                </button>
+            </div>
+
+            <!-- Abandon link -->
+            <button id="abandon-btn" style="
+                background:none;border:none;color:rgba(255,255,255,0.55);
+                font-size:11px;cursor:pointer;text-decoration:underline;
+                padding:2px 4px;transition:color 0.2s;">
+                Abandon interview (no results)
             </button>
-            <button id="discard-btn" style="
-                background:rgba(255,255,255,0.2);color:white;
-                border:2px solid rgba(255,255,255,0.5);
-                padding:10px 20px;border-radius:8px;font-weight:600;
-                font-size:14px;cursor:pointer;">
-                🗑 Start New
-            </button>
+
         </div>`;
 
     document.body.prepend(banner);
 
+    // ── Resume ───────────────────────────────────────────────────────────────
     document.getElementById("resume-btn").addEventListener("click", async () => {
         banner.remove();
         await resumeInterview(interruptedSessionId);
     });
-    document.getElementById("discard-btn").addEventListener("click", () => {
-        discardInterruptedSession();
+
+    // ── Submit Interrupted ───────────────────────────────────────────────────
+    document.getElementById("submit-interrupted-btn").addEventListener("click", async () => {
         banner.remove();
+        await submitInterruptedSession(interruptedSessionId);
+    });
+
+    // ── Abandon ──────────────────────────────────────────────────────────────
+    document.getElementById("abandon-btn").addEventListener("click", () => {
+        showAbandonConfirmation(interruptedSessionId, banner);
     });
 }
 
@@ -223,8 +265,149 @@ function hideResumeBanner() {
 }
 
 
-// CONNECTION LOST BANNER
+// ABANDON CONFIRMATION POPUP
+function showAbandonConfirmation(interruptedSessionId, bannerEl) {
+    document.getElementById("abandon-confirm")?.remove();
 
+    const popup = document.createElement("div");
+    popup.id = "abandon-confirm";
+    popup.style.cssText = `
+        position:fixed;top:0;left:0;right:0;bottom:0;z-index:10001;
+        background:rgba(0,0,0,0.65);
+        display:flex;align-items:center;justify-content:center;`;
+
+    popup.innerHTML = `
+        <div style="
+            background:white;border-radius:14px;padding:32px 28px;
+            max-width:420px;width:90%;text-align:center;
+            box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+
+            <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
+
+            <div style="font-size:18px;font-weight:700;color:#1a1a1a;margin-bottom:10px;">
+                Abandon Interview?
+            </div>
+
+            <div style="font-size:13px;color:#666;line-height:1.6;margin-bottom:24px;">
+                This will permanently discard your interview session.<br/>
+                <strong>You will not receive any results or feedback.</strong><br/>
+                This action cannot be undone.
+            </div>
+
+            <div style="display:flex;gap:12px;justify-content:center;">
+                <button id="abandon-cancel-btn" style="
+                    background:#f3f4f6;color:#374151;border:none;
+                    padding:12px 24px;border-radius:8px;
+                    font-weight:600;font-size:14px;cursor:pointer;">
+                    ← Go Back
+                </button>
+                <button id="abandon-confirm-btn" style="
+                    background:#ef4444;color:white;border:none;
+                    padding:12px 24px;border-radius:8px;
+                    font-weight:700;font-size:14px;cursor:pointer;">
+                    Yes, Abandon
+                </button>
+            </div>
+        </div>`;
+
+    document.body.appendChild(popup);
+
+    // Cancel — close popup, re-show banner
+    document.getElementById("abandon-cancel-btn").addEventListener("click", () => {
+        popup.remove();
+        // Re-show banner so they can choose again
+        showResumeBanner(interruptedSessionId);
+    });
+
+    // Confirm abandon
+    document.getElementById("abandon-confirm-btn").addEventListener("click", () => {
+        popup.remove();
+        if (bannerEl) bannerEl.remove();
+        discardInterruptedSession();
+        showToast("Interview abandoned.", "info");
+        log("Interview abandoned by candidate", "warning");
+    });
+}
+
+// SUBMIT INTERRUPTED SESSION
+
+ async function submitInterruptedSession(interruptedSessionId) {
+    log(`Submitting interrupted session: ${interruptedSessionId}`, "info");
+
+    const transcript = document.getElementById("transcript");
+    if (transcript) {
+        transcript.innerHTML = `
+            <div style="display:flex;flex-direction:column;align-items:center;
+                        justify-content:center;height:100%;">
+                <div style="width:60px;height:60px;border:4px solid #f59e0b;
+                            border-top:4px solid transparent;border-radius:50%;
+                            animation:spin 1s linear infinite;margin-bottom:20px;"></div>
+                <div style="color:#f59e0b;font-size:18px;font-weight:bold;margin-bottom:8px;">
+                    Submitting Interview…
+                </div>
+                <div style="color:#999;font-size:13px;">
+                    Generating your results and feedback…
+                </div>
+            </div>
+            <style>@keyframes spin { to{transform:rotate(360deg)} }</style>`;
+    }
+
+    startBtn.disabled  = true;
+    stopBtn.disabled   = true;
+    submitBtn.disabled = true;
+    skipBtn.disabled   = true;
+
+    try {
+        const res = await fetch(
+            `${API_URL_BASE}/finalize_session?session_id=${interruptedSessionId}`,
+            { method: "POST" }
+        );
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(data.detail || "Finalization failed");
+        }
+
+        // Success — show results
+        interviewEnded = true;
+        clearSessionFromStorage();
+        showToast("✅ Interview submitted successfully!", "success");
+        displayResults(data.summary);
+        stopInterview(false);
+
+        log("Interrupted session submitted via REST", "success");
+
+    } catch (err) {
+        log(`Submit interrupted failed: ${err.message}`, "error");
+        showToast(`❌ Could not submit: ${err.message}`, "error");
+
+        // Restore UI so they can try resume instead
+        startBtn.disabled = false;
+        if (transcript) {
+            transcript.innerHTML = `
+                <div style="display:flex;flex-direction:column;align-items:center;
+                            justify-content:center;height:100%;gap:16px;">
+                    <div style="font-size:40px;">❌</div>
+                    <div style="color:#ef4444;font-size:16px;font-weight:bold;">
+                        Submission Failed
+                    </div>
+                    <div style="color:#666;font-size:13px;text-align:center;">
+                        ${err.message}<br/>Try resuming the interview instead.
+                    </div>
+                    <button onclick="showResumeBanner('${interruptedSessionId}')"
+                        style="background:#667eea;color:white;border:none;
+                               padding:10px 20px;border-radius:8px;
+                               font-weight:700;cursor:pointer;font-size:14px;">
+                        Show Options Again
+                    </button>
+                </div>`;
+        }
+    }
+}
+
+ // CONNECTION LOST BANNER
+ 
 function showConnectionLostBanner(message = "Connection lost. Reconnecting…") {
     let banner = document.getElementById("connection-lost-banner");
     if (banner) { banner.querySelector(".clb-msg").textContent = message; return; }
@@ -241,9 +424,7 @@ function showConnectionLostBanner(message = "Connection lost. Reconnecting…") 
                     border-top:3px solid transparent;border-radius:50%;
                     animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
         <span class="clb-msg" style="font-weight:600;font-size:14px;">${message}</span>
-        <style>
-            @keyframes spin { to{transform:rotate(360deg)} }
-        </style>`;
+        <style>@keyframes spin { to{transform:rotate(360deg)} }</style>`;
     document.body.appendChild(banner);
 }
 
@@ -251,7 +432,9 @@ function hideConnectionLostBanner() {
     document.getElementById("connection-lost-banner")?.remove();
 }
 
+
 // UI SCREENS
+
 
 function showCurrentQuestion(questionText, questionNum) {
     const transcript = document.getElementById("transcript");
@@ -348,12 +531,12 @@ function showQuestionSkipped() {
             <div style="color:#666;font-size:14px;margin-bottom:10px;">
                 Moving to next question…
             </div>
-            <div style="color:#999;font-size:12px;padding:8px 12px;
-                        background:rgba(255,152,0,0.1);border-radius:6px;">Score: 0 points</div>
         </div>`;
 }
 
+
 // AUDIO HELPERS
+
 
 function floatTo16BitPCM(float32Array) {
     const buffer = new ArrayBuffer(float32Array.length * 2);
@@ -367,7 +550,6 @@ function floatTo16BitPCM(float32Array) {
 
 async function playAudioBytes(arrayBuffer) {
     if (!arrayBuffer || !audioContext) return;
-    log("Playing TTS audio", "info");
 
     isAISpeaking = true;
     muteMic();
@@ -380,7 +562,6 @@ async function playAudioBytes(arrayBuffer) {
         src.buffer = audioBuffer;
         src.connect(audioContext.destination);
         await new Promise(resolve => { src.onended = resolve; src.start(0); });
-        log("TTS playback complete", "success");
     } catch (e) {
         log(`TTS decode/play error: ${e.message}`, "error");
     } finally {
@@ -394,18 +575,17 @@ async function playAudioBytes(arrayBuffer) {
     }
 }
 
-// MIC CONTROL
+
+// MIC CONTROL — flag-only, no node disconnect (prevents WS drop on Chrome/Windows)
+
 
 function muteMic() {
     micEnabled = false;
 }
 
 function unmuteMic() {
-    if (isRunning) {
-        micEnabled = true;
-    }
+    if (isRunning) micEnabled = true;
 }
-
 
 // SILENCE TIMER
 
@@ -420,15 +600,12 @@ function resetSilenceTimer() {
     }, SILENCE_DELAY_MS);
 }
 
-
 // RESUME UPLOAD
-
 
 async function uploadResume() {
     const file = resumeInput.files[0];
     if (!file) { log("No file selected", "error"); return null; }
 
-    log(`Uploading resume: ${file.name}`, "info");
     const formData = new FormData();
     formData.append("file", file);
 
@@ -445,6 +622,7 @@ async function uploadResume() {
     }
 }
 
+
 // MICROPHONE INIT
 
 
@@ -452,14 +630,12 @@ async function initMicrophone() {
     teardownAudio();
 
     try {
-        log("Requesting microphone…", "info");
         audioContext = new AudioContext({ sampleRate: 16000 });
         stream       = await navigator.mediaDevices.getUserMedia({ audio: true });
         source       = audioContext.createMediaStreamSource(stream);
         processor    = audioContext.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
-            // micEnabled flag check — no node disconnect needed for muting
             if (!isRunning || !micEnabled) return;
             if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -497,6 +673,8 @@ function teardownAudio() {
 
 
 // WEBSOCKET — SINGLE SHARED CONNECT FUNCTION
+
+
 function connectWebSocket() {
     if (!sessionId) { log("connectWebSocket called with no sessionId", "error"); return; }
 
@@ -531,7 +709,7 @@ function connectWebSocket() {
         }, 5000);
     };
 
-    // ── onmessage 
+    // ── onmessage
     ws.onmessage = async (event) => {
         if (typeof event.data !== "string") {
             await playAudioBytes(event.data);
@@ -577,17 +755,14 @@ function connectWebSocket() {
 
             case "RESUMED": {
                 log(
-                    `Resumed: ${data.questions_answered} answered, ` +
-                    `${data.remaining_seconds}s left`,
+                    `Resumed: ${data.questions_answered} answered, ${data.remaining_seconds}s left`,
                     "success",
                 );
                 showToast("✅ Interview resumed!", "success");
 
-                // Restore question counter so next QUESTION increments correctly
                 currentQuestionNumber = data.questions_answered;
-
-                remainingSeconds = data.remaining_seconds;
-                inBufferTime     = data.in_buffer_time || false;
+                remainingSeconds      = data.remaining_seconds;
+                inBufferTime          = data.in_buffer_time || false;
                 updateTimerUI(remainingSeconds, inBufferTime);
                 if (!timerInterval) startLocalCountdown();
 
@@ -604,12 +779,10 @@ function connectWebSocket() {
                 isProcessing     = false;
                 log(`Question ${currentQuestionNumber} received`, "info");
                 showCurrentQuestion(data.text, currentQuestionNumber);
-                // Note: buttons stay disabled until TTS_END
                 break;
             }
 
             case "TTS_START": {
-                // Audio is about to stream in — ensure input is gated
                 submitBtn.disabled = true;
                 skipBtn.disabled   = true;
                 break;
@@ -617,7 +790,6 @@ function connectWebSocket() {
 
             case "TTS_END": {
                 audioChunksReady = true;
-
                 if (!isAISpeaking && !isProcessing && isRunning) {
                     unmuteMic();
                     submitBtn.disabled = false;
@@ -665,13 +837,12 @@ function connectWebSocket() {
         console.error(error);
     };
 
-    // ── onclose 
+    // ── onclose
     ws.onclose = (event) => {
         log(`WebSocket closed: code=${event.code}`, "warning");
 
         if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
 
-        // Persist session state for potential resume
         if (sessionId && !interviewEnded && !isDiscarding) {
             saveSessionToStorage(sessionId);
         }
@@ -704,8 +875,6 @@ function connectWebSocket() {
             if (interviewEnded || isDiscarding || !isRunning) return;
 
             log(`Reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT}…`, "info");
-
-            // Reset AI-speaking state before re-init to avoid stale gate
             isAISpeaking = false;
 
             const micOk = await initMicrophone();
@@ -719,8 +888,9 @@ function connectWebSocket() {
     };
 }
 
-   
-// START INTERVIEW (fresh)  
+ 
+// START INTERVIEW (fresh)
+
 
 async function startInterview() {
     if (isRunning) { log("Already running", "warning"); return; }
@@ -760,8 +930,8 @@ async function startInterview() {
     connectWebSocket();
 }
 
- // RESUME INTERVIEW
- 
+//RESUME INTERVIEW
+
 async function resumeInterview(existingSessionId) {
     if (isRunning) { log("Already running", "warning"); return; }
 
@@ -799,8 +969,9 @@ async function resumeInterview(existingSessionId) {
     connectWebSocket();
 }
 
- // DISCARD INTERRUPTED SESSION
- 
+
+// DISCARD INTERRUPTED SESSION (Abandon — no results)
+
 function discardInterruptedSession() {
     log("Discarding interrupted session", "warning");
     isDiscarding   = true;
@@ -809,15 +980,10 @@ function discardInterruptedSession() {
     sessionId = null;
     clearSessionFromStorage();
     isDiscarding = false;
-    log("Session discarded", "success");
 }
 
-
 // STOP INTERVIEW
-
-
 function stopInterview(resetUI = true) {
-    log("Stopping interview…", "info");
     isRunning = false;
     stopTimer();
     clearTimeout(silenceTimeout);
@@ -825,7 +991,6 @@ function stopInterview(resetUI = true) {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     teardownAudio();
     try { ws?.close(); ws = null; } catch {}
-    log("Interview stopped", "success");
 
     if (resetUI) {
         startBtn.disabled  = false;
@@ -836,7 +1001,6 @@ function stopInterview(resetUI = true) {
 }
 
 // RESET STATE
-
 function resetInterviewState() {
     interviewEnded        = false;
     isDiscarding          = false;
@@ -856,19 +1020,11 @@ function resetInterviewState() {
     clearTimeout(silenceTimeout);
 }
 
-
 // SUBMIT ANSWER
 
 function submitAnswer() {
-    if (isProcessing) {
-        log("Submit ignored: already processing", "warning");
-        return;
-    }
-    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) {
-        log(`Cannot submit: WS=${ws?.readyState}, running=${isRunning}`, "warning");
-        return;
-    }
-    
+    if (isProcessing) { return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) { return; }
     if (!audioChunksReady) {
         showToast("⚠️ Please wait — the question is still loading.", "warning");
         return;
@@ -884,19 +1040,10 @@ function submitAnswer() {
     ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
 }
 
-
 // SKIP QUESTION
-
-
 function skipQuestion() {
-    if (isProcessing) {
-        log("Skip ignored: already processing", "warning");
-        return;
-    }
-    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) {
-        log(`Cannot skip: WS=${ws?.readyState}, running=${isRunning}`, "warning");
-        return;
-    }
+    if (isProcessing) { return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) { return; }
     if (!audioChunksReady) {
         showToast("⚠️ Please wait — the question is still loading.", "warning");
         return;
@@ -904,7 +1051,7 @@ function skipQuestion() {
 
     log("→ Skipping question", "warning");
     isProcessing     = true;
-    muteMic();               // FLAG only
+    muteMic();
     audioChunksReady = false;
     clearTimeout(silenceTimeout);
     submitBtn.disabled = true;
@@ -912,8 +1059,7 @@ function skipQuestion() {
     ws.send(JSON.stringify({ action: "SKIP_QUESTION" }));
 }
 
-
-// RESULTS DISPLAY
+// RESULT DISPLAY
 
 function getScoreEmoji(score) {
     if (score >= 0.75) return "🟢";
@@ -943,13 +1089,15 @@ function displayResults(summary) {
 
     summary.questions.forEach((question, index) => {
         const answer   = summary.answers[index]                   || "No answer";
-        const score    = summary.scores[index];
+        const score    = summary.scores[index] || {final_score: 0};
         const duration = summary.time_per_answer_seconds?.[index] || 0;
 
         text += `${getScoreEmoji(score.final_score)} Question ${index + 1}:\n`;
         text += `   Q: ${question}\n`;
         text += `   A: ${answer}\n`;
-        text += `   Score: ${score.final_score.toFixed(2)} (${getScoreGrade(score.final_score)}) | Time: ${Math.floor(duration)}s\n\n`;
+
+        const fs = score.final_score ?? 0;
+        text += `   Score: ${fs.toFixed(2)} (${getScoreGrade(fs)}) | Time: ${Math.floor(duration)}s\n\n`;
     });
 
     text += "\n┌─────────────────────────────────────────────────────────────────┐\n";
@@ -978,7 +1126,6 @@ function displayResults(summary) {
 }
 
 // EVENT LISTENERS
- 
 resumeInput.addEventListener("change", () => {
     startBtn.disabled = !resumeInput.files[0];
 });
@@ -1006,7 +1153,8 @@ skipBtn.addEventListener("click", (e) => {
     skipQuestion();
 });
 
-// PAGE LOAD
+//PAGE LOAD
+
 (function onPageLoad() {
     const interruptedId = loadSessionFromStorage();
     if (interruptedId) {
@@ -1015,4 +1163,4 @@ skipBtn.addEventListener("click", (e) => {
     }
 })();
 
-log("audio.js v4 loaded ✓", "success");
+log("audio.js v5 loaded ✓", "success");
