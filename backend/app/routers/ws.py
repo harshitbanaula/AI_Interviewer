@@ -596,8 +596,13 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 async def _delayed_save():
                     await asyncio.sleep(15)
                     try:
-                        _save_session(session_id, session)
-                        print(f"[WS {session_id}] Delayed Redis save completed")
+                        from app.services.interview_state import get_session as _check_session
+                        still_exists = _check_session(session_id)
+                        if still_exists and not session.is_finalized:
+                            _save_session(session_id, session)
+                            print(f"[WS {session_id}] Delayed Redis save completed")
+                        else:
+                            print(f"[WS {session_id}] Delayed save skipped — session already finalized or deleted")
                     except Exception as ex:
                         print(f"[WS {session_id}] Delayed save failed: {ex}")
 
