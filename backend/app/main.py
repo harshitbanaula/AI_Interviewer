@@ -26,6 +26,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# file size limits
+
+MAX_FILE_SIZE = 3 * 1024 * 1024 
+MIN_FILE_SIZE = 1024
+ALLOWED_EXTENSIONS = {".pdf",".doc",".docx",".txt"}
+
 # ── Create DB tables on startup ──
 @app.on_event("startup")
 def startup():
@@ -93,13 +99,11 @@ async def upload_resume(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    allowed_extensions = [".pdf", ".doc", ".docx", ".txt"]
-    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type '{ext}'. Allowed: {allowed_extensions}"
-        )
+    
+    ext = "." + file.filename.rsplit(".",1)[-1].lower() if "." in file.filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid file type'{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
+    
 
     # ── Read file ──
     try:
@@ -107,8 +111,12 @@ async def upload_resume(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
-    if not content or len(content) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if not content or len(content) == MIN_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too small. Minimum size: {MIN_FILE_SIZE} bytes")
+    
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail= f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024):.1f} MB")
+
 
     # ── Parse resume ──
     try:
