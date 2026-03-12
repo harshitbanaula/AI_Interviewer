@@ -1,7 +1,6 @@
 import time
 import json
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, WebSocket, Query, WebSocketDisconnect
 
@@ -13,12 +12,10 @@ from app.services.tts import synthesize_speech
 from app.services.audio_storage import save_candidate_audio
 from app.services.evaluator import score_answer
 from app.repository import db_start_session, db_save_answer, db_complete_session
+from app.core.thread_pool import run_in_thread
 
 router = APIRouter()
 
-# Thread pool — all blocking I/O (LLM, TTS, STT, DB) runs here.
-
-_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ws_worker")
 
 # Minimum PCM bytes before we bother running Whisper.
 # 16 kHz × 16-bit = 32 000 bytes/s  →  3 200 bytes ≈ 0.1 s of audio.
@@ -27,9 +24,7 @@ _MIN_AUDIO_BYTES = 3_200
 
 
 async def run_blocking(func, *args):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, func, *args)
-
+    return await run_in_thread(func, *args)
 
 def get_db_session() -> Session:
     return SessionLocal()
@@ -613,7 +608,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                     fresh_db = SessionLocal()
                     summary  = session.final_result()
                     db_complete_session(fresh_db, session_id, summary)
-                    fresh_db.close()
+                    # fresh_db.close()
                     print(f"[WS {session_id}] Finalized session written to DB on disconnect")
                 except Exception as e:
                     print(f"[WS {session_id}] DB complete on disconnect failed: {e}")
