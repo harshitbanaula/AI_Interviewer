@@ -1,7 +1,7 @@
 import os
 import re
 import tempfile
-from typing import List, Dict
+from typing import List, Dict, Any
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 
 
@@ -83,7 +83,7 @@ def extract_projects_section(resume_text: str) -> str:
     
     section = match.group(2).strip()
     
-    # Fix missing newlines between projects
+    #missing newlines between projects
     section = re.sub(r'\.([A-Z][A-Za-z0-9\s\-\(\)/]+?\|)', r'.\n\1', section)
     
     return section
@@ -122,7 +122,7 @@ def parse_projects(resume_text: str) -> List[Dict[str, str]]:
     return projects
 
 
-def get_resume_summary(resume_text: str) -> Dict[str, any]:
+def get_resume_summary(resume_text: str) -> Dict[str, Any]:
     projects = parse_projects(resume_text)
 
     return {
