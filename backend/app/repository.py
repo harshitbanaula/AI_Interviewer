@@ -1,6 +1,7 @@
 # backend/app/repository.py
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from datetime import datetime
 from app.database import InterviewSessionModel, InterviewAnswerModel
 import os
@@ -27,6 +28,8 @@ def db_create_session(db: Session, session_id : str,job_description: str,resume_
         db.rollback()
         print(f"[DB ERROR] create_session: {e}")
         return False
+    finally:
+        db.close()
 
 
 
@@ -45,6 +48,8 @@ def db_start_session(db: Session, session_id: str):
         db.rollback()
         print(f"[DB ERROR] start_session: {e}")
         return False
+    finally:
+        db.close()
 
 def db_save_answer(
         db: Session,
@@ -104,6 +109,8 @@ def db_save_answer(
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        db.close()
     
     
 
@@ -130,60 +137,77 @@ def db_complete_session(db: Session, session_id: str, summary: dict):
         db.rollback()
         print(f"[DB ERROR] complete_session: {e}")
         return False
+    finally:
+        db.close()
+
 
 
 # READ Operations
 
 def db_get_session(db: Session, session_id: str):
-    return db.query(InterviewSessionModel).filter_by(session_id=session_id).first()
+    try:
 
+        return db.query(InterviewSessionModel).filter_by(session_id=session_id).first()
+    finally:
+        db.close()
 
 def db_get_answers(db: Session, session_id: str):
-    return db.query(InterviewAnswerModel).filter_by(session_id=session_id).order_by(InterviewAnswerModel.question_index).all()
+    try:
+        return db.query(InterviewAnswerModel).filter_by(session_id=session_id).order_by(InterviewAnswerModel.question_index).all()
+    finally:
+        db.close()
 
 def db_get_all_sessions(db: Session, limit: int = 50, offset: int = 0, status: str = None):
-    query = db.query(InterviewSessionModel)
-    if status:
-        query = query.filter(InterviewSessionModel.status == status)
+    try:
 
-    return query.order_by(InterviewSessionModel.created_at.desc()).offset(offset).limit(limit).all()
+        query = db.query(InterviewSessionModel)
+        if status:
+            query = query.filter(InterviewSessionModel.status == status)
 
+        return query.order_by(InterviewSessionModel.created_at.desc()).offset(offset).limit(limit).all()
+    finally:
+        db.close()
 
 def db_count_sessions(db: Session, status: str = None) -> int:
-    query = db.query(InterviewSessionModel)
-    
-    if status:
-        query = query.filter(InterviewSessionModel.status == status)
-    
-    return query.count()
+    try:
+        query = db.query(InterviewSessionModel)
+        if status:
+            query = query.filter(InterviewSessionModel.status == status)
+        
+        return query.count()
+    finally:
+        db.close()
 
 
 def db_get_statistics(db: Session) -> dict:
-    from sqlalchemy import func
-    
-    total = db.query(func.count(InterviewSessionModel.session_id)).scalar() or 0
-    
-    completed = db.query(InterviewSessionModel)\
-        .filter(InterviewSessionModel.status == "completed")\
-        .count()
-    
-    passed = db.query(InterviewSessionModel)\
-        .filter(InterviewSessionModel.result == "PASS")\
-        .count()
-    
-    avg_score = db.query(func.avg(InterviewSessionModel.average_score))\
-        .filter(InterviewSessionModel.average_score.isnot(None))\
-        .scalar()
-    
-    avg_duration = db.query(func.avg(InterviewSessionModel.total_duration_sec))\
-        .filter(InterviewSessionModel.total_duration_sec.isnot(None))\
-        .scalar()
-    
-    return {
-        "total_interviews": total,
-        "completed_interviews": completed,
-        "passed_interviews": passed,
-        "pass_rate": round(passed / completed * 100, 1) if completed > 0 else 0,
-        "average_score": round(avg_score, 2) if avg_score else 0,
-        "average_duration_minutes": round(avg_duration / 60, 1) if avg_duration else 0
-    }
+    try:
+
+        total = db.query(func.count(InterviewSessionModel.session_id)).scalar() or 0
+        
+        completed = db.query(InterviewSessionModel)\
+            .filter(InterviewSessionModel.status == "completed")\
+            .count()
+        
+        passed = db.query(InterviewSessionModel)\
+            .filter(InterviewSessionModel.result == "PASS")\
+            .count()
+        
+        avg_score = db.query(func.avg(InterviewSessionModel.average_score))\
+            .filter(InterviewSessionModel.average_score.isnot(None))\
+            .scalar()
+        
+        avg_duration = db.query(func.avg(InterviewSessionModel.total_duration_sec))\
+            .filter(InterviewSessionModel.total_duration_sec.isnot(None))\
+            .scalar()
+        
+        return {
+            "total_interviews": total,
+            "completed_interviews": completed,
+            "passed_interviews": passed,
+            "pass_rate": round(passed / completed * 100, 1) if completed > 0 else 0,
+            "average_score": round(avg_score, 2) if avg_score else 0,
+            "average_duration_minutes": round(avg_duration / 60, 1) if avg_duration else 0
+        }
+    finally:
+        db.close()
+        
