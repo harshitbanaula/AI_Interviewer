@@ -1,7 +1,7 @@
 import re 
 import os
 import json
-from typing import Dict
+from typing import Dict,Tuple,Optional,Any
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -157,8 +157,9 @@ WEIGHTS = {
 }
 
 
-# FIX: NON-ANSWER DETECTION
-def detect_non_answer(answer_text: str) -> tuple[bool, str]:
+
+# FIX: NON-ANSWER DETECTION - Use Tuple instead of tuple for Python 3.9 compatibility
+def detect_non_answer(answer_text: str) -> Tuple[bool, str]:
     answer_lower = answer_text.lower().strip()
     word_count = len(answer_text.split())
     
@@ -181,40 +182,23 @@ def detect_non_answer(answer_text: str) -> tuple[bool, str]:
     
     for phrase in non_answer_phrases:
         if phrase in answer_lower:
-            # Check if it's a short answer (likely just the non-answer phrase)
             if word_count < 15:
                 return True, f"Candidate said: '{phrase}'"
-            # If long answer but starts with non-answer, check ratio
             if answer_lower.startswith(phrase) and word_count < 30:
                 return True, f"Answer starts with: '{phrase}'"
     
-    # Pattern 2: Too short to be meaningful
     if word_count < 5:
         return True, f"Answer too short ({word_count} words)"
-    
-    # Pattern 3: Just repeating the question
-    question_words = set(answer_lower.split())
-    if len(question_words) > 0:
-        # If >80% of answer words are from question, likely just repeating
-        # (This is a simplified check - could be more sophisticated)
-        pass
     
     return False, ""
 
 
-# FIX: RETRY LOGIC FOR FAILED PARSING
-def parse_llm_response(raw: str, attempt: int = 1) -> dict:
+# FIX: RETRY LOGIC FOR FAILED PARSING - Add return type hint
+def parse_llm_response(raw: str, attempt: int = 1) -> Optional[Dict[str, Any]]:
     strategies = [
-        # Strategy 1: Direct parse (cleanest response)
         lambda r: json.loads(r),
-        
-        # Strategy 2: Strip markdown code blocks
         lambda r: json.loads(r.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()),
-        
-        # Strategy 3: Extract JSON from text
         lambda r: json.loads(r[r.find("{"):r.rfind("}")+1]),
-        
-        # Strategy 4: Find first { to last }
         lambda r: json.loads("{" + r.split("{", 1)[1].rsplit("}", 1)[0] + "}"),
     ]
     
@@ -230,43 +214,36 @@ def parse_llm_response(raw: str, attempt: int = 1) -> dict:
     return None
 
 
-def call_llm_with_retry(question: str, answer: str, max_retries: int = 3) -> dict:
+# FIX: LLM RETRY - Add return type hint
+def call_llm_with_retry(question: str, answer: str, max_retries: int = 3) -> Dict[str, Any]:
     for attempt in range(1, max_retries + 1):
         try:
-            raw = chain.invoke({
-                "question": question,
-                "answer": answer
-            })
-            
-            # Try to parse
+            raw = chain.invoke(
+                {"question": question, "answer": answer},
+                config={"timeout": 10}
+            )
             parsed = parse_llm_response(raw.strip(), attempt)
-            
             if parsed:
-                # Validate required fields
                 required = ["relevance", "technical_accuracy", "completeness", "clarity"]
                 if all(k in parsed for k in required):
                     return parsed
-                else:
-                    print(f"[EVALUATOR] Missing fields, attempt {attempt}/{max_retries}")
-            
         except Exception as e:
-            print(f"[EVALUATOR] Error attempt {attempt}/{max_retries}: {e}")
-    
-    # All retries failed - return neutral scores
-    print(f"[EVALUATOR] All {max_retries} attempts failed, using fallback scores")
+            print(f"[EVALUATOR] Attempt {attempt} failed: {e}")
+            if attempt < max_retries:
+                time.sleep(0.5)
+
+    print(f"[EVALUATOR] All retries failed, using fallback")
     return {
-        "relevance": 0.5,
-        "technical_accuracy": 0.5,
-        "completeness": 0.5,
-        "clarity": 0.5,
-        "strengths": [],
+        "relevance": 0.5, "technical_accuracy": 0.5,
+        "completeness": 0.5, "clarity": 0.5,
+        "final_score": 0.5, "strengths": [],
         "improvements": ["Automatic evaluation failed - requires manual review"],
         "is_non_answer": False
     }
 
 
-# MAIN SCORING FUNCTION
-def score_answer(answer_text: str, question: str) -> Dict:
+# MAIN SCORING FUNCTION - Update return type hint
+def score_answer(answer_text: str, question: str) -> Dict[str, Any]:
     answer_text = answer_text.strip()
     
     # CASE 1: Empty/Skipped Answer
@@ -287,7 +264,6 @@ def score_answer(answer_text: str, question: str) -> Dict:
         }
     
     # CASE 2: Non-Answer Detection
-
     is_non_answer, reason = detect_non_answer(answer_text)
     
     if is_non_answer:
@@ -302,9 +278,7 @@ def score_answer(answer_text: str, question: str) -> Dict:
             "is_non_answer": True
         }
     
-
     # CASE 3: Normal Answer - Call LLM with Retry
-    
     parsed = call_llm_with_retry(question, answer_text, max_retries=3)
     
     # Extract and validate scores
@@ -313,7 +287,7 @@ def score_answer(answer_text: str, question: str) -> Dict:
     completeness = float(parsed.get("completeness", 0.5))
     clarity = float(parsed.get("clarity", 0.5))
     
-    # Clamp values to 0-1 range (in case LLM goes outside)
+    # Clamp values to 0-1 range
     relevance = max(0.0, min(1.0, relevance))
     technical_accuracy = max(0.0, min(1.0, technical_accuracy))
     completeness = max(0.0, min(1.0, completeness))
@@ -323,9 +297,7 @@ def score_answer(answer_text: str, question: str) -> Dict:
     improvements = parsed.get("improvements", [])
     is_non_answer_llm = parsed.get("is_non_answer", False)
     
-    
     # Calculate Weighted Final Score
-    
     final_score = round(
         relevance * WEIGHTS["relevance"]
         + technical_accuracy * WEIGHTS["technical_accuracy"]
@@ -334,9 +306,7 @@ def score_answer(answer_text: str, question: str) -> Dict:
         2
     )
     
-    
     # Return Complete Evaluation
-    
     return {
         "relevance": round(relevance, 2),
         "technical_accuracy": round(technical_accuracy, 2),
@@ -349,10 +319,8 @@ def score_answer(answer_text: str, question: str) -> Dict:
     }
 
 
-
-# HELPER: Validate Score Consistency (for testing)
-
-def test_consistency(question: str, answer: str, runs: int = 5) -> dict:
+# HELPER: Validate Score Consistency - Add return type hint
+def test_consistency(question: str, answer: str, runs: int = 5) -> Dict[str, Any]:
     scores = []
     for i in range(runs):
         result = score_answer(answer, question)
@@ -371,36 +339,6 @@ def test_consistency(question: str, answer: str, runs: int = 5) -> dict:
         "std_dev": round(std_dev, 3),
         "scores": scores,
         "consistent": consistent
-    }
-
-
-# In evaluator.py — add timeout to chain.invoke
-
-def call_llm_with_retry(question: str, answer: str, max_retries: int = 3) -> dict:
-    for attempt in range(1, max_retries + 1):
-        try:
-            # Add timeout — don't wait more than 10s per attempt
-            raw = chain.invoke(
-                {"question": question, "answer": answer},
-                config={"timeout": 10}   # ← ADD THIS
-            )
-            parsed = parse_llm_response(raw.strip(), attempt)
-            if parsed:
-                required = ["relevance", "technical_accuracy", "completeness", "clarity"]
-                if all(k in parsed for k in required):
-                    return parsed
-        except Exception as e:
-            print(f"[EVALUATOR] Attempt {attempt} failed: {e}")
-            if attempt < max_retries:
-                time.sleep(0.5)  # brief backoff before retry
-
-    print(f"[EVALUATOR] All retries failed, using fallback")
-    return {
-        "relevance": 0.5, "technical_accuracy": 0.5,
-        "completeness": 0.5, "clarity": 0.5,
-        "final_score": 0.5, "strengths": [],
-        "improvements": ["Automatic evaluation failed - requires manual review"],
-        "is_non_answer": False
     }
 
 
