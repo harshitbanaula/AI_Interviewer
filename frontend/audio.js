@@ -1,5 +1,6 @@
-// CONSTANTS
-
+//frontend/audio.js
+ // CONSTANTS
+ 
 const WS_URL_BASE       = "ws://localhost:8000/ws/interview";
 const API_URL_BASE      = "http://localhost:8000";
 const STORAGE_KEY       = "ai_interview_session";
@@ -9,8 +10,11 @@ const RECONNECT_FAST_MS = 2_000;
 const RECONNECT_PROC_MS = 6_000;
 const MAX_RECONNECT     = 5;
 
+// ── CHANGE 3: Fullscreen warning timer 
+const FULLSCREEN_WARN_SECONDS = 30;
+
  // STATE
- 
+
 let sessionId      = null;
 let interviewEnded = false;
 let isDiscarding   = false;
@@ -43,32 +47,50 @@ let bufferWarningShown = false;
 let currentQuestionNumber = 0;
 let currentQuestion       = null;
 
- // UI ELEMENT REFS
- 
+
+// ── Fullscreen enforcement
+let fullscreenActive                = false;
+let fullscreenExitedDuringInterview = false;
+let fullscreenExitCount             = 0;
+let fullscreenWarningTimer          = null;
+
+
+// UI ELEMENT REFS
+
 const resumeInput = document.getElementById("resumeFile");
 const startBtn    = document.getElementById("startBtn");
 const stopBtn     = document.getElementById("stopBtn");
 const submitBtn   = document.getElementById("submitBtn");
 const skipBtn     = document.getElementById("skipBtn");
 
- // LOGGING
+// LOGGING
 
 function log(message, type = "info") {
     const prefix = { info: "ℹ️", success: "✅", error: "❌", warning: "⚠️" }[type] || "ℹ️";
     console.log(`[${new Date().toLocaleTimeString()}] ${prefix} ${message}`);
 }
 
-// BEFOREUNLOAD WARNING
 
+// ── beforeunload: auto-submit ONLY on tab close, not on disconnect ────────────
 window.addEventListener("beforeunload", (e) => {
-    if (isRunning && !interviewEnded) {
-        // Standard way to trigger the native browser warning dialog.
-        // returnValue must be set for older browsers; preventDefault for modern ones.
-        e.preventDefault();
-        e.returnValue = "Your interview is in progress. If you leave, your progress will be saved and you can resume later.";
-        return e.returnValue;
+    if (!isRunning || interviewEnded) return;
+
+    const sid = sessionId || loadSessionFromStorage();
+    if (sid) {
+        const payload = JSON.stringify({ session_id: sid, completion_reason: "tab_closed" });
+        try {
+            navigator.sendBeacon(
+                `${API_URL_BASE}/finalize_session`,
+                new Blob([payload], { type: "application/json" })
+            );
+        } catch {}
+        clearSessionFromStorage();
     }
+
+    e.preventDefault();
+    e.returnValue = "";
 });
+
 
 // LOCAL-STORAGE HELPERS
 
@@ -95,8 +117,7 @@ function clearSessionFromStorage() {
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* non-fatal */ }
 }
 
-
-// TIMER HELPERS
+ // TIMER HELPERS
 
 function formatTime(seconds) {
     if (typeof seconds !== "number" || isNaN(seconds) || seconds < 0) return "00:00";
@@ -140,6 +161,7 @@ function stopTimer() {
     timerInterval = null;
 }
 
+
 // TOAST NOTIFICATIONS
 
 function showToast(message, type = "info") {
@@ -178,8 +200,363 @@ function showToast(message, type = "info") {
     document.head.appendChild(style);
 })();
 
-// RESUME BANNER
 
+// ════════════════════════════════════════════════════════════════════════════
+// CHANGE 1 — FULLSCREEN GATE MODAL
+//
+// Before the interview begins, show a blocking popup that:
+//   • Explains that fullscreen is required
+//   • Has a single "Enter Fullscreen & Start" button
+//   • Resolves its Promise only after the browser confirms fullscreen is active
+//   • Rejects if the user dismisses without entering fullscreen
+//
+// The interview start sequence in startInterview() awaits this gate before
+// proceeding to resume upload / WebSocket connection.
+// ════════════════════════════════════════════════════════════════════════════
+function showFullscreenGate() {
+    return new Promise((resolve, reject) => {
+        document.getElementById("fs-gate-overlay")?.remove();
+
+        const overlay = document.createElement("div");
+        overlay.id = "fs-gate-overlay";
+        overlay.style.cssText = `
+            position:fixed;inset:0;z-index:99999;
+            background:rgba(0,0,0,0.82);
+            display:flex;align-items:center;justify-content:center;
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+            animation:fsGateFadeIn 0.25s ease;`;
+
+        overlay.innerHTML = `
+            <style>
+                @keyframes fsGateFadeIn { from{opacity:0} to{opacity:1} }
+                @keyframes fsGatePop    { from{opacity:0;transform:scale(0.92)} to{opacity:1;transform:scale(1)} }
+                #fs-gate-card { animation: fsGatePop 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+                #fs-enter-btn:hover { transform:translateY(-2px); box-shadow:0 8px 28px rgba(99,102,241,0.5) !important; }
+                #fs-cancel-btn:hover { color:#fff !important; }
+            </style>
+
+            <div id="fs-gate-card" style="
+                background:#0f172a;border:1px solid #1e293b;
+                border-radius:20px;padding:48px 40px;max-width:460px;width:90%;
+                text-align:center;box-shadow:0 32px 80px rgba(0,0,0,0.7);
+                position:relative;">
+
+                <!-- Icon -->
+                <div style="
+                    width:72px;height:72px;margin:0 auto 24px;
+                    background:linear-gradient(135deg,#6366f1,#8b5cf6);
+                    border-radius:18px;display:flex;align-items:center;
+                    justify-content:center;font-size:34px;
+                    box-shadow:0 8px 24px rgba(99,102,241,0.4);">🔲</div>
+
+                <!-- Heading -->
+                <div style="font-size:22px;font-weight:800;color:#f1f5f9;
+                            margin-bottom:10px;letter-spacing:-0.4px;">
+                    Fullscreen Required
+                </div>
+
+                <!-- Sub-text -->
+                <div style="font-size:14px;color:#94a3b8;line-height:1.75;
+                            margin-bottom:32px;max-width:340px;margin-left:auto;margin-right:auto;">
+                    This interview must be taken in <strong style="color:#e2e8f0;">fullscreen mode</strong>
+                    to ensure a fair and secure environment.<br/><br/>
+                    Exiting fullscreen at any point will trigger a
+                    <strong style="color:#fbbf24;">30-second warning</strong> — if you don't
+                    return, your interview will be auto-submitted.
+                </div>
+
+                <!-- Rules row -->
+                <div style="display:flex;gap:10px;margin-bottom:32px;text-align:left;">
+                    <div style="flex:1;background:#1e293b;border-radius:10px;padding:14px 12px;
+                                border:1px solid #334155;">
+                        <div style="font-size:18px;margin-bottom:4px;">✅</div>
+                        <div style="font-size:11px;color:#94a3b8;line-height:1.5;">
+                            WiFi drops &amp; reconnects are <strong style="color:#e2e8f0;">safe</strong> — your session is preserved
+                        </div>
+                    </div>
+                    <div style="flex:1;background:#1e293b;border-radius:10px;padding:14px 12px;
+                                border:1px solid #334155;">
+                        <div style="font-size:18px;margin-bottom:4px;">⚠️</div>
+                        <div style="font-size:11px;color:#94a3b8;line-height:1.5;">
+                            Exiting fullscreen starts a <strong style="color:#fbbf24;">30s</strong> countdown to auto-submit
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CTA -->
+                <button id="fs-enter-btn" style="
+                    width:100%;padding:16px;border:none;border-radius:12px;
+                    background:linear-gradient(135deg,#6366f1,#8b5cf6);
+                    color:white;font-size:16px;font-weight:700;cursor:pointer;
+                    box-shadow:0 4px 20px rgba(99,102,241,0.4);
+                    transition:transform 0.15s,box-shadow 0.15s;
+                    margin-bottom:14px;">
+                    🔲 Enter Fullscreen &amp; Start Interview
+                </button>
+
+                <!-- Dismiss -->
+                <button id="fs-cancel-btn" style="
+                    background:none;border:none;color:#475569;font-size:12px;
+                    cursor:pointer;transition:color 0.15s;text-decoration:underline;">
+                    Cancel — go back
+                </button>
+            </div>`;
+
+        document.body.appendChild(overlay);
+
+        // ── Enter fullscreen then verify ─────────────────────────────────────
+        document.getElementById("fs-enter-btn").addEventListener("click", async () => {
+            await enterFullscreen();
+
+            // Give the browser one tick to fire the fullscreenchange event
+            await new Promise(r => setTimeout(r, 120));
+
+            if (isInFullscreen()) {
+                fullscreenActive = true;
+                overlay.remove();
+                resolve();
+            } else {
+                // Browser denied — shake the button, don't close
+                const btn = document.getElementById("fs-enter-btn");
+                if (btn) {
+                    btn.textContent = "⚠️ Fullscreen denied — try again";
+                    btn.style.background = "linear-gradient(135deg,#dc2626,#ef4444)";
+                }
+            }
+        });
+
+        document.getElementById("fs-cancel-btn").addEventListener("click", () => {
+            overlay.remove();
+            reject(new Error("User cancelled fullscreen gate"));
+        });
+    });
+}
+
+
+// FULLSCREEN API HELPERS
+
+async function enterFullscreen() {
+    const el = document.documentElement;
+    try {
+        if      (el.requestFullscreen)       await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+        else if (el.mozRequestFullScreen)    await el.mozRequestFullScreen();
+        else if (el.msRequestFullscreen)     await el.msRequestFullscreen();
+        fullscreenActive = true;
+    } catch (err) {
+        log(`Fullscreen request failed: ${err.message}`, "warning");
+    }
+}
+
+function exitFullscreenAPI() {
+    try {
+        if      (document.exitFullscreen)        document.exitFullscreen();
+        else if (document.webkitExitFullscreen)  document.webkitExitFullscreen();
+        else if (document.mozCancelFullScreen)   document.mozCancelFullScreen();
+        else if (document.msExitFullscreen)      document.msExitFullscreen();
+    } catch {}
+}
+
+function isInFullscreen() {
+    return !!(
+        document.fullscreenElement      ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement   ||
+        document.msFullscreenElement
+    );
+}
+
+// ── Fullscreen change listener ───────────────────────────────────────────────
+function handleFullscreenChange() {
+    const nowFs = isInFullscreen();
+
+    if (!nowFs && isRunning && !interviewEnded) {
+        fullscreenActive = false;
+        fullscreenExitedDuringInterview = true;
+        fullscreenExitCount++;
+        log(`Fullscreen exited — exit #${fullscreenExitCount}`, "warning");
+        showFullscreenWarning();                 // 30-second countdown
+    } else if (nowFs) {
+        fullscreenActive = true;
+        if (fullscreenWarningTimer) {
+            fullscreenExitedDuringInterview = false;
+            dismissFullscreenWarning();
+        }
+    }
+}
+
+document.addEventListener("fullscreenchange",       handleFullscreenChange);
+document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+document.addEventListener("mozfullscreenchange",    handleFullscreenChange);
+document.addEventListener("MSFullscreenChange",     handleFullscreenChange);
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// CHANGE 3 — FULLSCREEN WARNING: 30-SECOND COUNTDOWN (was 10)
+//
+// Auto-submit fires only when this timer reaches zero.
+// Returning to fullscreen dismisses it cleanly.
+// Network disconnects do NOT trigger this path — they go through ws.onclose
+// which now always attempts to reconnect (CHANGE 4).
+// ════════════════════════════════════════════════════════════════════════════
+function showFullscreenWarning() {
+    document.getElementById("fullscreen-warning")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id    = "fullscreen-warning";
+    overlay.style.cssText = `
+        position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;
+        background:rgba(185,28,28,0.97);
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        color:white;text-align:center;padding:40px;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;`;
+
+    let countdown = FULLSCREEN_WARN_SECONDS;      // ← 30 seconds
+
+    overlay.innerHTML = `
+        <div style="font-size:72px;margin-bottom:24px;animation:shake 0.5s ease;">🚨</div>
+        <div style="font-size:30px;font-weight:800;margin-bottom:12px;letter-spacing:-0.5px;">
+            Fullscreen Mode Required
+        </div>
+        <div style="font-size:16px;opacity:0.9;line-height:1.7;
+                    margin-bottom:36px;max-width:520px;">
+            You have exited fullscreen. This interview requires fullscreen to continue.<br/>
+            Re-enter within
+            <span id="fs-countdown" style="font-weight:900;font-size:32px;
+                  display:inline-block;width:48px;text-align:center;
+                  color:#fde68a;">${countdown}</span>
+            seconds — or your interview will be <strong>automatically submitted</strong>.
+        </div>
+        <button id="reenter-fs-btn" style="
+            background:white;color:#b91c1c;border:none;
+            padding:18px 48px;border-radius:14px;
+            font-weight:800;font-size:18px;cursor:pointer;
+            box-shadow:0 6px 24px rgba(0,0,0,0.35);
+            margin-bottom:28px;transition:transform 0.1s;">
+            🔲 Re-enter Fullscreen
+        </button>
+        <div style="font-size:12px;opacity:0.65;max-width:400px;">
+            Exit #${fullscreenExitCount} — This event is recorded in your interview report.
+            ${fullscreenExitCount > 1 ? `You have exited fullscreen ${fullscreenExitCount} times.` : ""}
+        </div>
+        <style>
+            @keyframes shake {
+                0%,100%{transform:rotate(0)}
+                20%{transform:rotate(-8deg)}
+                40%{transform:rotate(8deg)}
+                60%{transform:rotate(-4deg)}
+                80%{transform:rotate(4deg)}
+            }
+        </style>`;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("reenter-fs-btn").addEventListener("click", async () => {
+        await enterFullscreen();
+        // handleFullscreenChange will dismiss if fullscreen was granted
+    });
+
+    const countdownEl = document.getElementById("fs-countdown");
+    fullscreenWarningTimer = setInterval(() => {
+        countdown--;
+        if (countdownEl) {
+            countdownEl.textContent = countdown;
+            // Colour shift: yellow → orange → red as time runs low
+            if (countdown <= 10)      countdownEl.style.color = "#fca5a5";
+            else if (countdown <= 20) countdownEl.style.color = "#fdba74";
+        }
+        if (countdown <= 0) {
+            clearInterval(fullscreenWarningTimer);
+            fullscreenWarningTimer = null;
+            overlay.remove();
+            log("Fullscreen 30s countdown expired — auto-submitting", "warning");
+            autoSubmitInterview("fullscreen_exit");   // only path that auto-submits for FS
+        }
+    }, 1000);
+}
+
+function dismissFullscreenWarning() {
+    clearInterval(fullscreenWarningTimer);
+    fullscreenWarningTimer = null;
+    document.getElementById("fullscreen-warning")?.remove();
+    if (isRunning && !interviewEnded) {
+        showToast("✅ Fullscreen restored — interview continues.", "success");
+    }
+}
+
+
+// AUTO-SUBMIT (fullscreen timeout or tab close only)
+
+async function autoSubmitInterview(reason = "unknown") {
+    const sid = sessionId || loadSessionFromStorage();
+    if (!sid) { log("autoSubmit: no session ID found", "warning"); return; }
+
+    log(`Auto-submitting — reason: ${reason}`, "warning");
+
+    interviewEnded = true;
+    stopInterview(false);
+    clearSessionFromStorage();
+
+    const transcript = document.getElementById("transcript");
+    if (transcript) {
+        const reasonLabel = {
+            fullscreen_exit : "Fullscreen exited",
+            tab_closed      : "Tab closed",
+            unknown         : "Session ended",
+        }[reason] || "Session ended";
+
+        transcript.innerHTML = `
+            <div style="display:flex;flex-direction:column;align-items:center;
+                        justify-content:center;height:100%;gap:16px;">
+                <div style="width:64px;height:64px;border:5px solid #ef4444;
+                            border-top:5px solid transparent;border-radius:50%;
+                            animation:spin 0.9s linear infinite;"></div>
+                <div style="color:#ef4444;font-size:20px;font-weight:800;">
+                    Auto-Submitting Interview
+                </div>
+                <div style="color:#6b7280;font-size:13px;text-align:center;max-width:320px;">
+                    Reason: <strong>${reasonLabel}</strong><br/>
+                    Generating your results and feedback…
+                </div>
+            </div>
+            <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+    }
+
+    try {
+        const res = await fetch(`${API_URL_BASE}/finalize_session`, {
+            method  : "POST",
+            headers : { "Content-Type": "application/json" },
+            body    : JSON.stringify({ session_id: sid, completion_reason: reason }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+        showToast(`Interview auto-submitted (${reason.replace("_", " ")}).`, "warning");
+        displayResults(data.summary);
+        log("Auto-submit completed successfully", "success");
+
+    } catch (err) {
+        log(`Auto-submit failed: ${err.message}`, "error");
+        if (transcript) {
+            transcript.innerHTML = `
+                <div style="padding:40px;text-align:center;">
+                    <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
+                    <div style="color:#dc2626;font-size:20px;font-weight:800;">
+                        Interview Ended
+                    </div>
+                    <div style="color:#6b7280;font-size:14px;margin-top:10px;line-height:1.6;">
+                        Auto-submission failed: ${err.message}<br/>
+                        Please contact the recruiter with your session ID:<br/>
+                        <strong style="font-family:monospace;font-size:12px;">${sid}</strong>
+                    </div>
+                </div>`;
+        }
+    }
+}
+
+
+// RESUME BANNER
 
 function showResumeBanner(interruptedSessionId) {
     document.getElementById("resume-banner")?.remove();
@@ -205,56 +582,40 @@ function showResumeBanner(interruptedSessionId) {
                 </div>
             </div>
         </div>
-
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-
             <div style="display:flex;gap:10px;">
-                <!-- Resume Button -->
                 <button id="resume-btn" style="
                     background:#22c55e;color:white;border:none;
                     padding:10px 20px;border-radius:8px;
-                    font-weight:700;font-size:14px;cursor:pointer;
-                    box-shadow:0 2px 8px rgba(34,197,94,0.4);
-                    transition:opacity 0.2s;">
+                    font-weight:700;font-size:14px;cursor:pointer;">
                     ▶ Resume Interview
                 </button>
-
-                <!-- Submit Button -->
                 <button id="submit-interrupted-btn" style="
                     background:#f59e0b;color:white;border:none;
                     padding:10px 20px;border-radius:8px;
-                    font-weight:700;font-size:14px;cursor:pointer;
-                    box-shadow:0 2px 8px rgba(245,158,11,0.4);
-                    transition:opacity 0.2s;">
+                    font-weight:700;font-size:14px;cursor:pointer;">
                     🏁 Submit Interview
                 </button>
             </div>
-
-            <!-- Abandon link -->
             <button id="abandon-btn" style="
                 background:none;border:none;color:rgba(255,255,255,0.55);
-                font-size:11px;cursor:pointer;text-decoration:underline;
-                padding:2px 4px;transition:color 0.2s;">
+                font-size:11px;cursor:pointer;text-decoration:underline;padding:2px 4px;">
                 Abandon interview (no results)
             </button>
-
         </div>`;
 
     document.body.prepend(banner);
 
-    // ── Resume ───────────────────────────────────────────────────────────────
     document.getElementById("resume-btn").addEventListener("click", async () => {
         banner.remove();
         await resumeInterview(interruptedSessionId);
     });
 
-    // ── Submit Interrupted ───────────────────────────────────────────────────
     document.getElementById("submit-interrupted-btn").addEventListener("click", async () => {
         banner.remove();
         await submitInterruptedSession(interruptedSessionId);
     });
 
-    // ── Abandon ──────────────────────────────────────────────────────────────
     document.getElementById("abandon-btn").addEventListener("click", () => {
         showAbandonConfirmation(interruptedSessionId, banner);
     });
@@ -265,7 +626,8 @@ function hideResumeBanner() {
 }
 
 
-// ABANDON CONFIRMATION POPUP
+// ABANDON CONFIRMATION
+
 function showAbandonConfirmation(interruptedSessionId, bannerEl) {
     document.getElementById("abandon-confirm")?.remove();
 
@@ -281,19 +643,15 @@ function showAbandonConfirmation(interruptedSessionId, bannerEl) {
             background:white;border-radius:14px;padding:32px 28px;
             max-width:420px;width:90%;text-align:center;
             box-shadow:0 20px 60px rgba(0,0,0,0.4);">
-
             <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
-
             <div style="font-size:18px;font-weight:700;color:#1a1a1a;margin-bottom:10px;">
                 Abandon Interview?
             </div>
-
             <div style="font-size:13px;color:#666;line-height:1.6;margin-bottom:24px;">
                 This will permanently discard your interview session.<br/>
                 <strong>You will not receive any results or feedback.</strong><br/>
                 This action cannot be undone.
             </div>
-
             <div style="display:flex;gap:12px;justify-content:center;">
                 <button id="abandon-cancel-btn" style="
                     background:#f3f4f6;color:#374151;border:none;
@@ -312,14 +670,11 @@ function showAbandonConfirmation(interruptedSessionId, bannerEl) {
 
     document.body.appendChild(popup);
 
-    // Cancel — close popup, re-show banner
     document.getElementById("abandon-cancel-btn").addEventListener("click", () => {
         popup.remove();
-        // Re-show banner so they can choose again
         showResumeBanner(interruptedSessionId);
     });
 
-    // Confirm abandon
     document.getElementById("abandon-confirm-btn").addEventListener("click", () => {
         popup.remove();
         if (bannerEl) bannerEl.remove();
@@ -329,9 +684,10 @@ function showAbandonConfirmation(interruptedSessionId, bannerEl) {
     });
 }
 
+
 // SUBMIT INTERRUPTED SESSION
 
- async function submitInterruptedSession(interruptedSessionId) {
+async function submitInterruptedSession(interruptedSessionId) {
     log(`Submitting interrupted session: ${interruptedSessionId}`, "info");
 
     const transcript = document.getElementById("transcript");
@@ -362,27 +718,19 @@ function showAbandonConfirmation(interruptedSessionId, bannerEl) {
             `${API_URL_BASE}/finalize_session?session_id=${interruptedSessionId}`,
             { method: "POST" }
         );
-
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Finalization failed");
 
-        if (!res.ok) {
-            throw new Error(data.detail || "Finalization failed");
-        }
-
-        // Success — show results
         interviewEnded = true;
         clearSessionFromStorage();
         showToast("✅ Interview submitted successfully!", "success");
         displayResults(data.summary);
         stopInterview(false);
-
         log("Interrupted session submitted via REST", "success");
 
     } catch (err) {
         log(`Submit interrupted failed: ${err.message}`, "error");
         showToast(`❌ Could not submit: ${err.message}`, "error");
-
-        // Restore UI so they can try resume instead
         startBtn.disabled = false;
         if (transcript) {
             transcript.innerHTML = `
@@ -406,8 +754,9 @@ function showAbandonConfirmation(interruptedSessionId, bannerEl) {
     }
 }
 
- // CONNECTION LOST BANNER
- 
+
+// CONNECTION LOST BANNER
+
 function showConnectionLostBanner(message = "Connection lost. Reconnecting…") {
     let banner = document.getElementById("connection-lost-banner");
     if (banner) { banner.querySelector(".clb-msg").textContent = message; return; }
@@ -434,7 +783,6 @@ function hideConnectionLostBanner() {
 
 
 // UI SCREENS
-
 
 function showCurrentQuestion(questionText, questionNum) {
     const transcript = document.getElementById("transcript");
@@ -537,7 +885,6 @@ function showQuestionSkipped() {
 
 // AUDIO HELPERS
 
-
 function floatTo16BitPCM(float32Array) {
     const buffer = new ArrayBuffer(float32Array.length * 2);
     const view   = new DataView(buffer);
@@ -575,19 +922,8 @@ async function playAudioBytes(arrayBuffer) {
     }
 }
 
-
-// MIC CONTROL — flag-only, no node disconnect (prevents WS drop on Chrome/Windows)
-
-
-function muteMic() {
-    micEnabled = false;
-}
-
-function unmuteMic() {
-    if (isRunning) micEnabled = true;
-}
-
-// SILENCE TIMER
+function muteMic()   { micEnabled = false; }
+function unmuteMic() { if (isRunning) micEnabled = true; }
 
 function resetSilenceTimer() {
     clearTimeout(silenceTimeout);
@@ -599,6 +935,28 @@ function resetSilenceTimer() {
         }
     }, SILENCE_DELAY_MS);
 }
+
+
+// MIC PERMISSION PRE-WARM
+//
+// Called when the user selects a resume file — well before fullscreen.
+// Triggers the browser's "Allow microphone?" popup in normal window context
+// so it never appears after fullscreen is entered (which would collapse it).
+// We immediately stop the test tracks; initMicrophone() re-opens them later.
+// If the user denies here we surface a clear error before they go any further.
+
+async function prewarmMicPermission() {
+    try {
+        const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        testStream.getTracks().forEach(t => t.stop());   // release immediately
+        log("Mic permission pre-granted", "success");
+        return true;
+    } catch (err) {
+        log(`Mic permission denied during pre-warm: ${err.message}`, "error");
+        return false;
+    }
+}
+
 
 // RESUME UPLOAD
 
@@ -623,15 +981,57 @@ async function uploadResume() {
 }
 
 
-// MICROPHONE INIT
+// MICROPHONE — TWO-PHASE INIT
+//
+// Phase 1 — openMicStream():
+//   Opens the getUserMedia stream BEFORE fullscreen is entered.
+//   This is the only call that triggers the browser permission popup.
+//   Must run in normal (non-fullscreen) window context.
+//
+// Phase 2 — initMicrophone():
+//   Wires up AudioContext + ScriptProcessor using the already-open stream.
+//   Never calls getUserMedia, so safe to run inside fullscreen.
+//   Falls back to a fresh getUserMedia only on the reconnect path where
+//   no pre-opened stream exists.
 
+async function openMicStream() {
+    // Close any leftover stream from a previous session
+    if (stream) {
+        try { stream.getTracks().forEach(t => t.stop()); } catch {}
+        stream = null;
+    }
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        log("Mic stream opened (pre-fullscreen)", "success");
+        return true;
+    } catch (err) {
+        log(`openMicStream failed: ${err.message}`, "error");
+        return false;
+    }
+}
 
 async function initMicrophone() {
-    teardownAudio();
+    // Preserve stream reference before tearing down nodes
+    const existingStream = stream;
+    micEnabled = false;
+    try { processor?.disconnect(); } catch {}
+    try { source?.disconnect();    } catch {}
+    try { audioContext?.close();   } catch {}
+    audioContext = null; processor = null; source = null;
+    // stream tracks are NOT stopped here so openMicStream's stream survives
 
     try {
+        // Reuse stream opened by openMicStream() if still active.
+        // On the reconnect path (no pre-open) fall back to a fresh getUserMedia.
+        if (existingStream && existingStream.active) {
+            stream = existingStream;
+            log("Reusing pre-opened mic stream (no popup)", "info");
+        } else {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            log("Mic stream opened (reconnect path)", "info");
+        }
+
         audioContext = new AudioContext({ sampleRate: 16000 });
-        stream       = await navigator.mediaDevices.getUserMedia({ audio: true });
         source       = audioContext.createMediaStreamSource(stream);
         processor    = audioContext.createScriptProcessor(4096, 1, 1);
 
@@ -657,23 +1057,31 @@ async function initMicrophone() {
         log("Microphone ready", "success");
         return true;
     } catch (err) {
-        log(`Microphone failed: ${err.message}`, "error");
+        log(`initMicrophone failed: ${err.message}`, "error");
         return false;
     }
 }
 
 function teardownAudio() {
+    // Tears down AudioContext and processor nodes only.
+    // Stream tracks are stopped separately in stopInterview() so that
+    // a pre-opened stream survives across initMicrophone() calls (e.g. reconnects).
     micEnabled = false;
-    try { processor?.disconnect(); }                        catch {}
-    try { source?.disconnect(); }                           catch {}
-    try { audioContext?.close(); }                          catch {}
-    try { stream?.getTracks().forEach(t => t.stop()); }    catch {}
-    audioContext = null; processor = null; source = null; stream = null;
+    try { processor?.disconnect(); } catch {}
+    try { source?.disconnect();    } catch {}
+    try { audioContext?.close();   } catch {}
+    audioContext = null; processor = null; source = null;
+}
+
+function stopMicStream() {
+    // Fully releases the getUserMedia stream — call this only when the
+    // interview is truly over (stopInterview) or on a fresh start.
+    try { stream?.getTracks().forEach(t => t.stop()); } catch {}
+    stream = null;
 }
 
 
-// WEBSOCKET — SINGLE SHARED CONNECT FUNCTION
-
+// WEBSOCKET
 
 function connectWebSocket() {
     if (!sessionId) { log("connectWebSocket called with no sessionId", "error"); return; }
@@ -689,7 +1097,6 @@ function connectWebSocket() {
     ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
-    // ── onopen 
     ws.onopen = () => {
         log("WebSocket connected", "success");
         hideConnectionLostBanner();
@@ -709,7 +1116,6 @@ function connectWebSocket() {
         }, 5000);
     };
 
-    // ── onmessage
     ws.onmessage = async (event) => {
         if (typeof event.data !== "string") {
             await playAudioBytes(event.data);
@@ -725,9 +1131,7 @@ function connectWebSocket() {
 
         switch (data.type) {
 
-            case "KEEPALIVE": {
-                break;
-            }
+            case "KEEPALIVE": break;
 
             case "TIMER_UPDATE": {
                 remainingSeconds = data.remaining_seconds;
@@ -754,21 +1158,14 @@ function connectWebSocket() {
             }
 
             case "RESUMED": {
-                log(
-                    `Resumed: ${data.questions_answered} answered, ${data.remaining_seconds}s left`,
-                    "success",
-                );
+                log(`Resumed: ${data.questions_answered} answered, ${data.remaining_seconds}s left`, "success");
                 showToast("✅ Interview resumed!", "success");
-
                 currentQuestionNumber = data.questions_answered;
                 remainingSeconds      = data.remaining_seconds;
                 inBufferTime          = data.in_buffer_time || false;
                 updateTimerUI(remainingSeconds, inBufferTime);
                 if (!timerInterval) startLocalCountdown();
-
-                if (data.is_processing) {
-                    showProcessing("Resuming interview…");
-                }
+                if (data.is_processing) showProcessing("Resuming interview…");
                 break;
             }
 
@@ -831,13 +1228,25 @@ function connectWebSocket() {
         }
     };
 
-    // ── onerror 
     ws.onerror = (error) => {
         log("WebSocket error", "error");
         console.error(error);
     };
 
-    // ── onclose
+    // ════════════════════════════════════════════════════════════════════════
+    // CHANGE 4 — ws.onclose: ALWAYS reconnect on network drops
+    //
+    // Previously: if fullscreenExitedDuringInterview was true, reconnect was
+    // blocked and autoSubmit was called here — meaning a WiFi blip that
+    // happened while the fullscreen warning was showing would auto-submit.
+    //
+    // Now: ws.onclose NEVER calls autoSubmitInterview directly.
+    //   • Auto-submit is triggered ONLY by:
+    //       1. The 30s fullscreen countdown expiring (showFullscreenWarning)
+    //       2. The beforeunload beacon (tab close)
+    //   • Any ws.onclose that fires while fullscreen warning is active simply
+    //     reconnects — the fullscreen countdown continues independently.
+    // ════════════════════════════════════════════════════════════════════════
     ws.onclose = (event) => {
         log(`WebSocket closed: code=${event.code}`, "warning");
 
@@ -847,8 +1256,10 @@ function connectWebSocket() {
             saveSessionToStorage(sessionId);
         }
 
+        // Interview already done — nothing to do
         if (interviewEnded || isDiscarding || !isRunning) return;
 
+        // Too many retries
         if (reconnectAttempts >= MAX_RECONNECT) {
             log(`Max reconnect attempts (${MAX_RECONNECT}) reached`, "error");
             showConnectionLostBanner(
@@ -858,6 +1269,10 @@ function connectWebSocket() {
             return;
         }
 
+        // ── Always reconnect — WiFi drops, server restarts, anything ─────────
+        // The fullscreen countdown (if active) continues independently on the
+        // client. If the candidate is back in fullscreen and reconnects within
+        // 30s, both recover gracefully.
         const delay = isProcessing ? RECONNECT_PROC_MS : RECONNECT_FAST_MS;
 
         if (isProcessing) {
@@ -888,18 +1303,85 @@ function connectWebSocket() {
     };
 }
 
- 
-// START INTERVIEW (fresh)
 
-
+// ════════════════════════════════════════════════════════════════════════════
+// CHANGE 2 — startInterview: FULLSCREEN GATE BEFORE ANYTHING ELSE
+//
+// Old flow: enterFullscreen() → warn if denied → proceed regardless
+// New flow: showFullscreenGate() blocks until user IS in fullscreen.
+//           If they cancel the gate, the interview does not start.
+//           Only after confirmed fullscreen does resume upload + WS connect run.
+// ════════════════════════════════════════════════════════════════════════════
 async function startInterview() {
     if (isRunning) { log("Already running", "warning"); return; }
 
     resetInterviewState();
-    isRunning = true;
     startBtn.disabled = true;
 
     const transcript = document.getElementById("transcript");
+
+    // ── Step 1: Upload resume IMMEDIATELY on button click ─────────────────
+    // This must be the very first async operation. getUserMedia and fullscreen
+    // requests can disturb browser focus and clear the file input on some
+    // Chrome versions. Capturing the file right now avoids that entirely.
+    transcript.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;
+                    justify-content:center;height:100%;">
+            <div style="width:80px;height:80px;
+                        background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                        border-radius:50%;display:flex;align-items:center;
+                        justify-content:center;margin-bottom:20px;">
+                <span style="font-size:40px;">📄</span>
+            </div>
+            <div style="font-size:22px;font-weight:bold;color:#667eea;margin-bottom:10px;">
+                Uploading Resume…
+            </div>
+            <div style="color:#666;font-size:14px;">Please wait</div>
+        </div>`;
+
+    sessionId = await uploadResume();
+    if (!sessionId) {
+        // Upload failed — reset so they can try again
+        isRunning = false;
+        startBtn.disabled = false;
+        transcript.innerHTML = "";
+        return;
+    }
+    saveSessionToStorage(sessionId);
+    log(`Resume uploaded, session: ${sessionId}`, "success");
+
+    // ── Step 2: Open mic stream BEFORE fullscreen ─────────────────────────
+    // getUserMedia is the only browser call that shows a permission popup.
+    // Running it here (normal window, after upload) means no popup can
+    // appear inside fullscreen later. initMicrophone() will reuse this stream.
+    const streamOk = await openMicStream();
+    if (!streamOk) {
+        alert(
+            "Microphone access is required for the interview.\n\n" +
+            "Please allow microphone access in your browser settings and try again."
+        );
+        startBtn.disabled = false;
+        transcript.innerHTML = "";
+        return;
+    }
+
+    // ── Step 3: Fullscreen gate ───────────────────────────────────────────
+    // Both resume upload and mic stream are done — entering fullscreen now
+    // will not trigger any popup or disturb any pending request.
+    try {
+        await showFullscreenGate();
+        showToast("✅ Fullscreen active — starting interview.", "success");
+    } catch {
+        log("Fullscreen gate cancelled by user", "warning");
+        stopMicStream();
+        startBtn.disabled = false;
+        transcript.innerHTML = "";
+        return;
+    }
+
+    // ── Step 4: Interview is live ─────────────────────────────────────────
+    isRunning = true;
+
     transcript.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;
                     justify-content:center;height:100%;">
@@ -912,31 +1394,41 @@ async function startInterview() {
             <div style="font-size:22px;font-weight:bold;color:#667eea;margin-bottom:10px;">
                 Starting Interview
             </div>
-            <div style="color:#666;font-size:14px;">Uploading resume…</div>
+            <div style="color:#666;font-size:14px;">Preparing your questions…</div>
         </div>`;
 
-    sessionId = await uploadResume();
-    if (!sessionId) { isRunning = false; startBtn.disabled = false; return; }
-
-    saveSessionToStorage(sessionId);
-
+    // ── Step 5: Wire up AudioContext using the already-open stream ────────
+    // initMicrophone() reuses the stream from Step 2 — no getUserMedia call,
+    // no popup, no fullscreen collapse.
     const micOk = await initMicrophone();
     if (!micOk) {
-        alert("Microphone access denied. Please allow microphone and try again.");
+        alert("Microphone initialisation failed. Please refresh and try again.");
         stopInterview(true);
         return;
     }
 
+    // ── Step 6: Connect WebSocket ─────────────────────────────────────────
     connectWebSocket();
 }
 
-//RESUME INTERVIEW
+
+// RESUME INTERVIEW
 
 async function resumeInterview(existingSessionId) {
     if (isRunning) { log("Already running", "warning"); return; }
 
     log(`Resuming session: ${existingSessionId}`, "info");
     resetInterviewState();
+
+    // Show fullscreen gate before reconnecting
+    try {
+        await showFullscreenGate();
+    } catch {
+        log("Fullscreen gate cancelled on resume", "warning");
+        showResumeBanner(existingSessionId);   // put the banner back
+        return;
+    }
+
     isRunning = true;
     sessionId = existingSessionId;
     saveSessionToStorage(sessionId);
@@ -970,7 +1462,7 @@ async function resumeInterview(existingSessionId) {
 }
 
 
-// DISCARD INTERRUPTED SESSION (Abandon — no results)
+// DISCARD INTERRUPTED SESSION
 
 function discardInterruptedSession() {
     log("Discarding interrupted session", "warning");
@@ -982,14 +1474,20 @@ function discardInterruptedSession() {
     isDiscarding = false;
 }
 
+
 // STOP INTERVIEW
+
 function stopInterview(resetUI = true) {
     isRunning = false;
     stopTimer();
     clearTimeout(silenceTimeout);
+    dismissFullscreenWarning();
+    if (isInFullscreen()) exitFullscreenAPI();
+    fullscreenActive = false;
     if (pingInterval)   { clearInterval(pingInterval);  pingInterval   = null; }
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    teardownAudio();
+    teardownAudio();    // nodes only
+    stopMicStream();    // release getUserMedia stream
     try { ws?.close(); ws = null; } catch {}
 
     if (resetUI) {
@@ -1000,7 +1498,9 @@ function stopInterview(resetUI = true) {
     }
 }
 
+
 // RESET STATE
+
 function resetInterviewState() {
     interviewEnded        = false;
     isDiscarding          = false;
@@ -1016,15 +1516,22 @@ function resetInterviewState() {
     warned5Min            = false;
     bufferWarningShown    = false;
     reconnectAttempts     = 0;
+
+    fullscreenActive                = false;
+    fullscreenExitedDuringInterview = false;
+    fullscreenExitCount             = 0;
+    clearInterval(fullscreenWarningTimer);
+    fullscreenWarningTimer          = null;
     stopTimer();
     clearTimeout(silenceTimeout);
 }
 
+
 // SUBMIT ANSWER
 
 function submitAnswer() {
-    if (isProcessing) { return; }
-    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) { return; }
+    if (isProcessing) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) return;
     if (!audioChunksReady) {
         showToast("⚠️ Please wait — the question is still loading.", "warning");
         return;
@@ -1040,10 +1547,12 @@ function submitAnswer() {
     ws.send(JSON.stringify({ action: "SUBMIT_ANSWER" }));
 }
 
+
 // SKIP QUESTION
+
 function skipQuestion() {
-    if (isProcessing) { return; }
-    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) { return; }
+    if (isProcessing) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !isRunning) return;
     if (!audioChunksReady) {
         showToast("⚠️ Please wait — the question is still loading.", "warning");
         return;
@@ -1058,6 +1567,7 @@ function skipQuestion() {
     skipBtn.disabled   = true;
     ws.send(JSON.stringify({ action: "SKIP_QUESTION" }));
 }
+
 
 // RESULT DISPLAY
 
@@ -1089,15 +1599,13 @@ function displayResults(summary) {
 
     summary.questions.forEach((question, index) => {
         const answer   = summary.answers[index]                   || "No answer";
-        const score    = summary.scores[index] || {final_score: 0};
+        const score    = summary.scores[index];
         const duration = summary.time_per_answer_seconds?.[index] || 0;
 
         text += `${getScoreEmoji(score.final_score)} Question ${index + 1}:\n`;
         text += `   Q: ${question}\n`;
         text += `   A: ${answer}\n`;
-
-        const fs = score.final_score ?? 0;
-        text += `   Score: ${fs.toFixed(2)} (${getScoreGrade(fs)}) | Time: ${Math.floor(duration)}s\n\n`;
+        text += `   Score: ${score.final_score.toFixed(2)} (${getScoreGrade(score.final_score)}) | Time: ${Math.floor(duration)}s\n\n`;
     });
 
     text += "\n┌─────────────────────────────────────────────────────────────────┐\n";
@@ -1125,8 +1633,16 @@ function displayResults(summary) {
     transcript.scrollTop   = 0;
 }
 
+
 // EVENT LISTENERS
+
 resumeInput.addEventListener("change", () => {
+    // Only enable the start button — do NOT call openMicStream() here.
+    // Calling getUserMedia inside a file input change event causes Chrome to
+    // reset the file input (clearing the selected file) when the mic
+    // permission dialog appears, making the resume disappear before upload.
+    // openMicStream() is called at Step 1 of startInterview() instead —
+    // still before fullscreen, still in normal window context.
     startBtn.disabled = !resumeInput.files[0];
 });
 
@@ -1153,7 +1669,8 @@ skipBtn.addEventListener("click", (e) => {
     skipQuestion();
 });
 
-//PAGE LOAD
+
+// PAGE LOAD
 
 (function onPageLoad() {
     const interruptedId = loadSessionFromStorage();
@@ -1163,4 +1680,4 @@ skipBtn.addEventListener("click", (e) => {
     }
 })();
 
-log("audio.js v5 loaded ✓", "success");
+log("audio.js v7 loaded ✓ — fullscreen gate + 30s warning + safe reconnect", "success");
