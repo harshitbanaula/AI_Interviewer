@@ -6,10 +6,16 @@ from datetime import datetime
 from app.database import InterviewSessionModel, InterviewAnswerModel
 import os
 
-#SESSION Operations
+# SESSION Operations
 
-def db_create_session(db: Session, session_id : str,job_description: str,resume_text: str = None, candidate_name: str = None, candidate_email: str = None):
-    
+def db_create_session(
+    db: Session,
+    session_id: str,
+    job_description: str,
+    resume_text: str = None,
+    candidate_name: str = None,
+    candidate_email: str = None,
+):
     try:
         row = InterviewSessionModel(
             session_id=session_id,
@@ -18,7 +24,7 @@ def db_create_session(db: Session, session_id : str,job_description: str,resume_
             candidate_name=candidate_name,
             candidate_email=candidate_email,
             status="created",
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
         db.add(row)
         db.commit()
@@ -28,13 +34,9 @@ def db_create_session(db: Session, session_id : str,job_description: str,resume_
         db.rollback()
         print(f"[DB ERROR] create_session: {e}")
         return False
-    finally:
-        db.close()
-
 
 
 def db_start_session(db: Session, session_id: str):
-
     try:
         row = db.query(InterviewSessionModel).filter_by(session_id=session_id).first()
         if row:
@@ -48,11 +50,10 @@ def db_start_session(db: Session, session_id: str):
         db.rollback()
         print(f"[DB ERROR] start_session: {e}")
         return False
-    finally:
-        db.close()
+
 
 def db_save_answer(
-        db: Session,
+    db: Session,
     session_id: str,
     question_index: int,
     question_text: str,
@@ -62,13 +63,11 @@ def db_save_answer(
     audio_file_path: str,
     stage: str = None,
     project_mentioned: str = None,
-    is_skipped: bool = False
-        
+    is_skipped: bool = False,
 ):
     try:
-        # ── Validate and normalize audio path ──
+        # Validate and normalize audio path
         if audio_file_path and os.path.exists(audio_file_path):
-            # Store relative path only (cleaner for portability)
             audio_file_path = os.path.relpath(audio_file_path)
         else:
             audio_file_path = None
@@ -83,36 +82,29 @@ def db_save_answer(
             is_skipped=is_skipped,
             duration_seconds=duration_seconds,
             audio_file_path=audio_file_path,
-
-            # Scores
-            length_correctness=score.get("length_correctness"),
-            semantic_correctness=score.get("semantic_correctness"),
-            reasoning_quality=score.get("reasoning_quality"),
+            # ── Score fields — names now match the evaluator's output keys ──
+            relevance=score.get("relevance"),
+            technical_accuracy=score.get("technical_accuracy"),
+            completeness=score.get("completeness"),
             clarity=score.get("clarity"),
             final_score=score.get("final_score"),
             strengths=score.get("strengths", []),
             improvements=score.get("improvements", []),
-
-            # Timestamps auto-set by model defaults
             created_at=datetime.utcnow(),
-            answered_at=datetime.utcnow()
+            answered_at=datetime.utcnow(),
         )
-        
+
         db.add(row)
         db.commit()
         print(f"[DB] Answer saved: session={session_id}, Q{question_index}")
         return True
-        
+
     except Exception as e:
         db.rollback()
         print(f"[DB ERROR] save_answer Q{question_index}: {e}")
         import traceback
         traceback.print_exc()
         return False
-    finally:
-        db.close()
-    
-    
 
 
 def db_complete_session(db: Session, session_id: str, summary: dict):
@@ -128,6 +120,7 @@ def db_complete_session(db: Session, session_id: str, summary: dict):
             row.questions_asked = summary.get("questions_asked", 0)
             row.questions_answered = summary.get("questions_answered", 0)
             row.covered_projects = summary.get("covered_projects", [])
+            # ── Column is feedback_text in both the model and session state ──
             row.feedback_text = summary.get("feedback", "")
             db.commit()
             print(f"[DB] Session completed: {session_id} → {summary.get('result')}")
@@ -137,77 +130,76 @@ def db_complete_session(db: Session, session_id: str, summary: dict):
         db.rollback()
         print(f"[DB ERROR] complete_session: {e}")
         return False
-    finally:
-        db.close()
-
 
 
 # READ Operations
 
 def db_get_session(db: Session, session_id: str):
-    try:
+    return db.query(InterviewSessionModel).filter_by(session_id=session_id).first()
 
-        return db.query(InterviewSessionModel).filter_by(session_id=session_id).first()
-    finally:
-        db.close()
 
 def db_get_answers(db: Session, session_id: str):
-    try:
-        return db.query(InterviewAnswerModel).filter_by(session_id=session_id).order_by(InterviewAnswerModel.question_index).all()
-    finally:
-        db.close()
+    return (
+        db.query(InterviewAnswerModel)
+        .filter_by(session_id=session_id)
+        .order_by(InterviewAnswerModel.question_index)
+        .all()
+    )
 
-def db_get_all_sessions(db: Session, limit: int = 50, offset: int = 0, status: str = None):
-    try:
 
-        query = db.query(InterviewSessionModel)
-        if status:
-            query = query.filter(InterviewSessionModel.status == status)
+def db_get_all_sessions(
+    db: Session, limit: int = 50, offset: int = 0, status: str = None
+):
+    query = db.query(InterviewSessionModel)
+    if status:
+        query = query.filter(InterviewSessionModel.status == status)
+    return (
+        query.order_by(InterviewSessionModel.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
-        return query.order_by(InterviewSessionModel.created_at.desc()).offset(offset).limit(limit).all()
-    finally:
-        db.close()
 
 def db_count_sessions(db: Session, status: str = None) -> int:
-    try:
-        query = db.query(InterviewSessionModel)
-        if status:
-            query = query.filter(InterviewSessionModel.status == status)
-        
-        return query.count()
-    finally:
-        db.close()
+    query = db.query(InterviewSessionModel)
+    if status:
+        query = query.filter(InterviewSessionModel.status == status)
+    return query.count()
 
 
 def db_get_statistics(db: Session) -> dict:
-    try:
+    total = db.query(func.count(InterviewSessionModel.session_id)).scalar() or 0
 
-        total = db.query(func.count(InterviewSessionModel.session_id)).scalar() or 0
-        
-        completed = db.query(InterviewSessionModel)\
-            .filter(InterviewSessionModel.status == "completed")\
-            .count()
-        
-        passed = db.query(InterviewSessionModel)\
-            .filter(InterviewSessionModel.result == "PASS")\
-            .count()
-        
-        avg_score = db.query(func.avg(InterviewSessionModel.average_score))\
-            .filter(InterviewSessionModel.average_score.isnot(None))\
-            .scalar()
-        
-        avg_duration = db.query(func.avg(InterviewSessionModel.total_duration_sec))\
-            .filter(InterviewSessionModel.total_duration_sec.isnot(None))\
-            .scalar()
-        
-        return {
-            "total_interviews": total,
-            "completed_interviews": completed,
-            "passed_interviews": passed,
-            "pass_rate": round(passed / completed * 100, 1) if completed > 0 else 0,
-            "average_score": round(avg_score, 2) if avg_score else 0,
-            "average_duration_minutes": round(avg_duration / 60, 1) if avg_duration else 0
-        }
-    finally:
-        db.close()
-        
+    completed = (
+        db.query(InterviewSessionModel)
+        .filter(InterviewSessionModel.status == "completed")
+        .count()
+    )
+
+    passed = (
+        db.query(InterviewSessionModel)
+        .filter(InterviewSessionModel.result == "PASS")
+        .count()
+    )
+
+    avg_score = (
+        db.query(func.avg(InterviewSessionModel.average_score))
+        .filter(InterviewSessionModel.average_score.isnot(None))
+        .scalar()
+    )
+
+    avg_duration = (
+        db.query(func.avg(InterviewSessionModel.total_duration_sec))
+        .filter(InterviewSessionModel.total_duration_sec.isnot(None))
+        .scalar()
+    )
+
+    return {
+        "total_interviews": total,
+        "completed_interviews": completed,
+        "passed_interviews": passed,
+        "pass_rate": round(passed / completed * 100, 1) if completed > 0 else 0,
+        "average_score": round(avg_score, 2) if avg_score else 0,
+        "average_duration_minutes": round(avg_duration / 60, 1) if avg_duration else 0,
+    }
