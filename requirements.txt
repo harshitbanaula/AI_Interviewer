@@ -36,3 +36,6 @@ phonemizer
 # move session state to redis 
 redis
 hiredis
+
+# text to speech model (microsoft)
+edge_tts
