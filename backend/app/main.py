@@ -1,6 +1,4 @@
-# backend/app/main.py - WITH DATABASE INTEGRATION
-
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.database import init_db, SessionLocal
@@ -8,6 +6,7 @@ from app.services.interview_state import create_session, get_session, get_active
 from app.services.resume_parser import parse_resume
 from app.services.job_inference import infer_job_description
 from app.repository import db_create_session
+from app.core.rate_limiter import RateLimit
 from uuid import uuid4
 from dotenv import load_dotenv
 import re
@@ -26,45 +25,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# file size limits
+# ── File size limits 
+MAX_FILE_SIZE      = 3 * 1024 * 1024
+MIN_FILE_SIZE      = 1024
+ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
-MAX_FILE_SIZE = 3 * 1024 * 1024 
-MIN_FILE_SIZE = 1024
-ALLOWED_EXTENSIONS = {".pdf",".doc",".docx",".txt"}
+# ── Rate limit: 5 resume uploads per 10 minutes per IP 
+_upload_limit = RateLimit("upload_resume", max_requests=5, window_seconds=600)
 
-# ── Create DB tables on startup ──
+
+# ── Startup 
 @app.on_event("startup")
 def startup():
     init_db()
     print("[STARTUP] Database initialized")
 
-app.include_router(ws_router)
 
+# ── Routers 
+app.include_router(ws_router)
 app.include_router(finalize.router)
 
 
+# ── Helpers 
+
 def extract_candidate_name(resume_text: str) -> str:
     lines = [line.strip() for line in resume_text.split("\n") if line.strip()]
-    
+
     if not lines:
         return "Unknown Candidate"
-    
-    # Try first non-empty line
+
     first_line = lines[0]
-    
-    # Check if it looks like a name (2-4 capitalized words, no special chars)
     name_pattern = r'^([A-Z][a-z]+(?: [A-Z][a-z]+){1,3})$'
     if re.match(name_pattern, first_line):
         return first_line
-    
-    # Fallback: look for "Name:" pattern
+
     for line in lines[:5]:
         if line.lower().startswith("name:"):
             name = line.split(":", 1)[1].strip()
             if name:
                 return name
-    
-    # Last resort: take first 2-3 capitalized words from first line
+
     words = first_line.split()
     name_words = []
     for word in words[:3]:
@@ -72,7 +72,7 @@ def extract_candidate_name(resume_text: str) -> str:
             name_words.append(word)
         else:
             break
-    
+
     return " ".join(name_words) if name_words else "Unknown Candidate"
 
 
@@ -82,7 +82,7 @@ def extract_candidate_email(resume_text: str) -> str:
     return matches[0] if matches else None
 
 
-
+# ── Routes 
 
 @app.get("/")
 def health():
@@ -94,31 +94,40 @@ def health():
 
 
 @app.post("/upload_resume")
-async def upload_resume(file: UploadFile = File(...)):
-    
+async def upload_resume(
+    request: Request,
+    file: UploadFile = File(...),
+    _: None = Depends(_upload_limit),
+):
+    # ── File validation 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    
-    ext = "." + file.filename.rsplit(".",1)[-1].lower() if "." in file.filename else ""
+    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
     if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Invalid file type'{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
 
-    # ── Read file ──
     try:
         content = await file.read()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
-    if not content or len(content) == MIN_FILE_SIZE:
-        raise HTTPException(status_code=400, detail=f"File too small. Minimum size: {MIN_FILE_SIZE} bytes")
-    
+    if not content or len(content) < MIN_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too small. Minimum size: {MIN_FILE_SIZE} bytes"
+        )
+
     if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail= f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024):.1f} MB")
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024 * 1024):.1f} MB"
+        )
 
-
-    # ── Parse resume ──
+    # ── Parse resume 
     try:
         resume_text = parse_resume(file.filename, content)
         print(f" Resume parsed: {len(resume_text)} characters")
@@ -128,14 +137,12 @@ async def upload_resume(file: UploadFile = File(...)):
     if not resume_text or len(resume_text.strip()) < 50:
         raise HTTPException(status_code=400, detail="Resume content too short or unreadable")
 
-
-    # ── Extract candidate info ──
-    candidate_name = extract_candidate_name(resume_text)
+    # ── Extract candidate info 
+    candidate_name  = extract_candidate_name(resume_text)
     candidate_email = extract_candidate_email(resume_text)
     print(f"Candidate: {candidate_name}, Email: {candidate_email or 'Not found'}")
 
-
-    # ── Infer job description ──
+    # ── Infer job description 
     try:
         job_description = infer_job_description(resume_text)
         print(f"Job inferred: {job_description}")
@@ -143,7 +150,7 @@ async def upload_resume(file: UploadFile = File(...)):
         print(f" Job inference failed, using fallback: {e}")
         job_description = "Software Engineer"
 
-    # ── Create session in memory ──
+    # ── Create session in Redis 
     try:
         session_id = str(uuid4())
         create_session(session_id, job_description, resume_text)
@@ -151,7 +158,7 @@ async def upload_resume(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
 
-    # ── Create session in DB with candidate data ──
+    # ── Create session in DB 
     try:
         db = SessionLocal()
         success = db_create_session(
@@ -160,26 +167,26 @@ async def upload_resume(file: UploadFile = File(...)):
             job_description=job_description,
             resume_text=resume_text,
             candidate_name=candidate_name,
-            candidate_email=candidate_email
+            candidate_email=candidate_email,
         )
         db.close()
-        
+
         if success:
             print(f"DB session created: {session_id}")
         else:
-            print(f"DB session creation failed (non-critical)")
-            
+            print("DB session creation failed (non-critical)")
+
     except Exception as e:
         print(f"DB error (non-critical): {e}")
 
     return JSONResponse(
         status_code=201,
         content={
-            "session_id": session_id,
+            "session_id":      session_id,
             "job_description": job_description,
-            "candidate_name": candidate_name,
-            "status": "success",
-            "message": "Resume uploaded successfully"
+            "candidate_name":  candidate_name,
+            "status":          "success",
+            "message":         "Resume uploaded successfully",
         }
     )
 
@@ -191,11 +198,11 @@ def check_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     return {
-        "exists": True,
-        "session_id": session_id,
-        "questions_count": len(session.questions),
-        "answers_count": len(session.answers),
-        "completed": session.completed
+        "exists":           True,
+        "session_id":       session_id,
+        "questions_count":  len(session.questions),
+        "answers_count":    len(session.answers),
+        "completed":        session.completed,
     }
 
 

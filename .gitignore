@@ -9,3 +9,4 @@ parsing_test.py
 models/
 conn_test.py
 test_db.py
+test_ws_ratelimit.py
