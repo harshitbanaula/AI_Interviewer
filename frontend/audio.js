@@ -10,7 +10,7 @@ const RECONNECT_FAST_MS = 2_000;
 const RECONNECT_PROC_MS = 6_000;
 const MAX_RECONNECT     = 5;
 
-// ── CHANGE 3: Fullscreen warning timer 
+// ── CHANGE 3: Fullscreen warning timer increased from 10 → 30 seconds ────────
 const FULLSCREEN_WARN_SECONDS = 30;
 
  // STATE
@@ -53,6 +53,7 @@ let fullscreenActive                = false;
 let fullscreenExitedDuringInterview = false;
 let fullscreenExitCount             = 0;
 let fullscreenWarningTimer          = null;
+let fullscreenWarningActive         = false;  // true while 30s countdown is running
 
 
 // UI ELEMENT REFS
@@ -402,6 +403,17 @@ document.addEventListener("MSFullscreenChange",     handleFullscreenChange);
 function showFullscreenWarning() {
     document.getElementById("fullscreen-warning")?.remove();
 
+    // ── Pause the interview: close WS so backend stops sending questions ──
+    // ws.onclose will NOT reconnect while fullscreenWarningActive is true.
+    // If candidate returns within 30s, dismissFullscreenWarning() reconnects.
+    fullscreenWarningActive = true;
+    muteMic();
+    if (ws) {
+        try { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; ws.close(); } catch {}
+        ws = null;
+    }
+    if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+
     const overlay = document.createElement("div");
     overlay.id    = "fullscreen-warning";
     overlay.style.cssText = `
@@ -477,10 +489,13 @@ function showFullscreenWarning() {
 
 function dismissFullscreenWarning() {
     clearInterval(fullscreenWarningTimer);
-    fullscreenWarningTimer = null;
+    fullscreenWarningTimer  = null;
+    fullscreenWarningActive = false;
     document.getElementById("fullscreen-warning")?.remove();
     if (isRunning && !interviewEnded) {
-        showToast("✅ Fullscreen restored — interview continues.", "success");
+        showToast("✅ Fullscreen restored — reconnecting…", "success");
+        // Reconnect WebSocket so the interview resumes from where it paused
+        connectWebSocket();
     }
 }
 
@@ -493,7 +508,8 @@ async function autoSubmitInterview(reason = "unknown") {
 
     log(`Auto-submitting — reason: ${reason}`, "warning");
 
-    interviewEnded = true;
+    interviewEnded          = true;
+    fullscreenWarningActive = false;
     stopInterview(false);
     clearSessionFromStorage();
 
@@ -1259,6 +1275,10 @@ function connectWebSocket() {
         // Interview already done — nothing to do
         if (interviewEnded || isDiscarding || !isRunning) return;
 
+        // Fullscreen warning is active — WS was intentionally closed to pause
+        // the interview. dismissFullscreenWarning() will reconnect if candidate returns.
+        if (fullscreenWarningActive) return;
+
         // Too many retries
         if (reconnectAttempts >= MAX_RECONNECT) {
             log(`Max reconnect attempts (${MAX_RECONNECT}) reached`, "error");
@@ -1520,6 +1540,7 @@ function resetInterviewState() {
     fullscreenActive                = false;
     fullscreenExitedDuringInterview = false;
     fullscreenExitCount             = 0;
+    fullscreenWarningActive         = false;
     clearInterval(fullscreenWarningTimer);
     fullscreenWarningTimer          = null;
     stopTimer();
@@ -1599,13 +1620,21 @@ function displayResults(summary) {
 
     summary.questions.forEach((question, index) => {
         const answer   = summary.answers[index]                   || "No answer";
-        const score    = summary.scores[index];
+        const score    = summary.scores?.[index];
         const duration = summary.time_per_answer_seconds?.[index] || 0;
 
-        text += `${getScoreEmoji(score.final_score)} Question ${index + 1}:\n`;
-        text += `   Q: ${question}\n`;
-        text += `   A: ${answer}\n`;
-        text += `   Score: ${score.final_score.toFixed(2)} (${getScoreGrade(score.final_score)}) | Time: ${Math.floor(duration)}s\n\n`;
+        if (score && score.final_score !== undefined) {
+            text += `${getScoreEmoji(score.final_score)} Question ${index + 1}:\n`;
+            text += `   Q: ${question}\n`;
+            text += `   A: ${answer}\n`;
+            text += `   Score: ${score.final_score.toFixed(2)} (${getScoreGrade(score.final_score)}) | Time: ${Math.floor(duration)}s\n\n`;
+        } else {
+            // Question was asked but not answered before session ended
+            text += `⬜ Question ${index + 1}:\n`;
+            text += `   Q: ${question}\n`;
+            text += `   A: ${answer}\n`;
+            text += `   Score: Not scored (unanswered)\n\n`;
+        }
     });
 
     text += "\n┌─────────────────────────────────────────────────────────────────┐\n";
