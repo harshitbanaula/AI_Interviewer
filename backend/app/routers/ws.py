@@ -30,7 +30,7 @@ def get_db_session() -> Session:
     return SessionLocal()
 
 
-# WebSocket handler
+# ─── WebSocket handler  
 
 @router.websocket("/ws/interview")
 async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
@@ -45,7 +45,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         await ws.close()
         return
 
-    # ── Detect reconnect 
+    # ── Detect reconnect  
     is_reconnect = (
         len(session.questions) > 0
         and session.session_start_time is not None
@@ -53,7 +53,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         and not session.completed
     )
 
-    # ── Per-connection state 
+    # ── Per-connection state  
     socket_open         = True
     end_sent            = False
     buffer_warning_sent = False
@@ -63,7 +63,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
 
     db = get_db_session()
 
-    # SAFE SEND HELPERS
+    # ─── SAFE SEND HELPERS  
 
     async def safe_send_json(payload: dict):
         nonlocal socket_open
@@ -85,11 +85,8 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
             print(f"[WS {session_id}] send_bytes failed: {e}")
             socket_open = False
 
-    
-    # KEEPALIVE WRAPPER
-    
+    # ─── KEEPALIVE WRAPPER  
     # Accepts coroutine, Task, or Future.
- 
 
     async def with_keepalive(task_or_coro, interval: float = 2.0):
         if asyncio.iscoroutine(task_or_coro):
@@ -106,7 +103,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
 
         return task.result()
 
-    # TTS SYNTHESIS
+    # ─── TTS SYNTHESIS  
 
     async def synthesize_with_keepalive(text: str) -> bytes | None:
         task = asyncio.create_task(run_blocking(synthesize_speech, text, 0, 0.85))
@@ -116,7 +113,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
             print(f"[WS {session_id}] TTS failed: {e}")
             return None
 
-    # SEND QUESTION
+    # ─── SEND QUESTION  
 
     async def send_question(q: str):
         nonlocal accepting_audio, is_processing
@@ -155,8 +152,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         accepting_audio = True
         is_processing   = False
 
-
-    # CLEAN END SEQUENCE
+    # ─── CLEAN END SEQUENCE  
 
     async def send_end_and_close():
         nonlocal end_sent, socket_open
@@ -196,8 +192,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         delete_session(session_id)
         print(f"[WS {session_id}] Session cleaned up")
 
-
-    # DB ANSWER SAVE (runs in thread pool)
+    # ─── DB ANSWER SAVE (runs in thread pool)  
 
     def _save_answer_to_db(question_index, answer_text, audio_path, is_skipped):
         try:
@@ -224,7 +219,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         except Exception as e:
             print(f"[DB ERROR] save_answer Q{question_index}: {e}")
 
-    # TIME MONITOR
+    # ─── TIME MONITOR  
 
     async def monitor_time_limit():
         nonlocal buffer_warning_sent
@@ -261,34 +256,30 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 await send_end_and_close()
                 break
 
+    # ─── STT + AUDIO-SAVE (keepalive-wrapped)  
 
-    # STT + AUDIO-SAVE  (keepalive-wrapped)
-
-
-    async def transcribe_and_save(audio_bytes_snapshot: bytes, current_q_idx: int) -> tuple[str | None, str]:
+    async def transcribe_and_save(
+        audio_bytes_snapshot: bytes, current_q_idx: int
+    ) -> tuple[str | None, str]:
         if len(audio_bytes_snapshot) < _MIN_AUDIO_BYTES:
             print(
                 f"[WS {session_id}] Audio too short "
                 f"({len(audio_bytes_snapshot)} bytes < {_MIN_AUDIO_BYTES}), skipping STT"
             )
-            return None, "" 
+            return None, ""
 
         try:
-            # asyncio.gather() returns a Future (already scheduled on the event loop).
             gather_future = asyncio.gather(
                 run_blocking(save_candidate_audio, session_id, current_q_idx, audio_bytes_snapshot),
                 run_blocking(transcribe_chunk, audio_bytes_snapshot),
             )
-            # with_keepalive() handles Futures via its else-branch.
             audio_path, answer_text = await with_keepalive(gather_future)
             return audio_path, answer_text
         except Exception as e:
             print(f"[WS {session_id}] STT/save failed: {e}")
             return None, ""
 
-    
-    # PROCESS ANSWER → NEXT QUESTION
-    
+    # ─── PROCESS ANSWER → NEXT QUESTION  
 
     async def process_answer_and_get_next(
         answer_text: str,
@@ -374,7 +365,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
 
         await send_question(next_q)
 
-    # START: RECONNECT PATH
+    # ─── START: RECONNECT PATH
 
     time_monitor_task = None
 
@@ -437,9 +428,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
             db.close()
             return
 
-
-    # START: FRESH PATH
-    
+    # ─── START: FRESH PATH  
 
     else:
         print(f"[WS {session_id}] Fresh connection")
@@ -472,24 +461,28 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         print(f"[WS {session_id}] ⏱ Timer started, sending first question")
         await send_question(first_q)
 
-    
-    # MAIN RECEIVE LOOP
-    
+    # ─── MAIN RECEIVE LOOP
 
     try:
         while socket_open:
             msg = await ws.receive()
 
+            # exit cleanly on disconnect message  
+            if msg.get("type") == "websocket.disconnect":
+                print(f"[WS {session_id}] Disconnect message received, exiting loop")
+                socket_open = False
+                break
+
             if session.is_finalized:
                 continue
 
-            # ── Binary: PCM audio 
+            # ── Binary: PCM audio  
             if msg.get("bytes"):
                 if accepting_audio and session.expecting_answer:
                     audio_buffer.extend(msg["bytes"])
                 continue
 
-            # ── Text: JSON action 
+            # ── Text: JSON action  
             if not msg.get("text"):
                 continue
 
@@ -510,7 +503,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                         f"(expecting={session.expecting_answer}, processing={is_processing})"
                     )
                     continue
-                    # close PCM 
+
                 accepting_audio      = False
                 audio_bytes_snapshot = bytes(audio_buffer)
                 audio_buffer.clear()
@@ -556,7 +549,16 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 )
 
     except WebSocketDisconnect:
-        print(f"[WS {session_id}] Client disconnected")
+        print(f"[WS {session_id}] Client disconnected (WebSocketDisconnect)")
+        socket_open = False
+
+    except RuntimeError as e:
+        if "disconnect" in str(e).lower() or "receive" in str(e).lower():
+            print(f"[WS {session_id}] Client disconnected (RuntimeError: {e})")
+        else:
+            print(f"[WS {session_id}] Unexpected RuntimeError: {e}")
+            import traceback
+            traceback.print_exc()
         socket_open = False
 
     except Exception as e:
@@ -565,7 +567,7 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
         traceback.print_exc()
         socket_open = False
 
-    # FINALLY: cleanup
+    # ─── FINALLY: cleanup 
 
     finally:
         if time_monitor_task:
@@ -604,14 +606,16 @@ async def interview_ws(ws: WebSocket, session_id: str = Query(...)):
                 asyncio.create_task(_delayed_save())
 
             else:
+                # Session was finalized during this connection — write to DB
+                fresh_db = SessionLocal()
                 try:
-                    fresh_db = SessionLocal()
-                    summary  = session.final_result()
+                    summary = session.final_result()
                     db_complete_session(fresh_db, session_id, summary)
-                    # fresh_db.close()
                     print(f"[WS {session_id}] Finalized session written to DB on disconnect")
                 except Exception as e:
                     print(f"[WS {session_id}] DB complete on disconnect failed: {e}")
+                finally:
+                    fresh_db.close()   # FIX: was never closed in original code
 
         except Exception as e:
             print(f"[WS {session_id}] Error in disconnect handler: {e}")
