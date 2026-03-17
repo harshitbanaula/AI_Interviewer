@@ -622,9 +622,6 @@
 
 
 
-
-
-
 import time
 import json
 import asyncio
@@ -641,6 +638,7 @@ from app.services.evaluator import score_answer
 from app.repository import db_start_session, db_save_answer, db_complete_session
 from app.core.thread_pool import run_in_thread
 from app.core.rate_limiter import check_ws_rate_limit
+from app.services.session_auth import verify_session_token, delete_session_token
 
 router = APIRouter()
 
@@ -658,18 +656,16 @@ def get_db_session() -> Session:
     return SessionLocal()
 
 
-# ─── WebSocket handler ────────────────────────────────────────────────────────
+# ─── WebSocket handler
 
 @router.websocket("/ws/interview")
 async def interview_ws(
     ws:         WebSocket,
     session_id: str = Query(...),
+    token:      str = Query(...),
 ):
-    # ── Rate limit: 30 WS connections per minute per IP ─────────────────
-    # Set high enough to never affect a real candidate (WiFi drops trigger
-    # up to 5 reconnect attempts each, plus fullscreen reconnects).
-    # Still blocks bots hammering the endpoint.
-    if not check_ws_rate_limit(ws, "ws_interview", max_requests=30, window_seconds=60):
+    # ── Rate limit: 10 WS connections per minute per IP ────────
+    if not check_ws_rate_limit(ws, "ws_interview", max_requests=10, window_seconds=60):
         await ws.accept()
         await ws.send_json({
             "type": "ERROR",
@@ -680,6 +676,16 @@ async def interview_ws(
 
     await ws.accept()
 
+    # ── Token verification
+    if not verify_session_token(session_id, token):
+        await ws.send_json({
+            "type": "ERROR",
+            "text": "Unauthorised. Your session token is invalid or has expired.",
+        })
+        await ws.close()
+        print(f"[AUTH] Rejected WS for session {session_id[:8]}... — bad token")
+        return
+
     session = get_session(session_id)
     if not session:
         await ws.send_json({
@@ -689,7 +695,7 @@ async def interview_ws(
         await ws.close()
         return
 
-    # ── Detect reconnect ──────────────────────────────────────────────────────
+    # ── Detect reconnect  
     is_reconnect = (
         len(session.questions) > 0
         and session.session_start_time is not None
@@ -697,7 +703,7 @@ async def interview_ws(
         and not session.completed
     )
 
-    # ── Per-connection state ──────────────────────────────────────────────────
+    # ── Per-connection state  
     socket_open         = True
     end_sent            = False
     buffer_warning_sent = False
@@ -707,7 +713,7 @@ async def interview_ws(
 
     db = get_db_session()
 
-    # ─── SAFE SEND HELPERS ────────────────────────────────────────────────────
+    # ─── SAFE SEND HELPERS  
 
     async def safe_send_json(payload: dict):
         nonlocal socket_open
@@ -729,7 +735,7 @@ async def interview_ws(
             print(f"[WS {session_id}] send_bytes failed: {e}")
             socket_open = False
 
-    # ─── KEEPALIVE WRAPPER ────────────────────────────────────────────────────
+    # ─── KEEPALIVE WRAPPER 
     # Accepts coroutine, Task, or Future.
 
     async def with_keepalive(task_or_coro, interval: float = 2.0):
@@ -747,7 +753,7 @@ async def interview_ws(
 
         return task.result()
 
-    # ─── TTS SYNTHESIS ────────────────────────────────────────────────────────
+    # ─── TTS SYNTHESIS 
 
     async def synthesize_with_keepalive(text: str) -> bytes | None:
         task = asyncio.create_task(run_blocking(synthesize_speech, text, 0, 0.85))
@@ -757,7 +763,7 @@ async def interview_ws(
             print(f"[WS {session_id}] TTS failed: {e}")
             return None
 
-    # ─── SEND QUESTION ────────────────────────────────────────────────────────
+    # ─── SEND QUESTION 
 
     async def send_question(q: str):
         nonlocal accepting_audio, is_processing
@@ -796,7 +802,7 @@ async def interview_ws(
         accepting_audio = True
         is_processing   = False
 
-    # ─── CLEAN END SEQUENCE ───────────────────────────────────────────────────
+    # ─── CLEAN END SEQUENCE 
 
     async def send_end_and_close():
         nonlocal end_sent, socket_open
@@ -834,9 +840,10 @@ async def interview_ws(
             pass
 
         delete_session(session_id)
+        delete_session_token(session_id)
         print(f"[WS {session_id}] Session cleaned up")
 
-    # ─── DB ANSWER SAVE (runs in thread pool) ────────────────────────────────
+    # ─── DB ANSWER SAVE (runs in thread pool) 
 
     def _save_answer_to_db(question_index, answer_text, audio_path, is_skipped):
         try:
@@ -863,7 +870,7 @@ async def interview_ws(
         except Exception as e:
             print(f"[DB ERROR] save_answer Q{question_index}: {e}")
 
-    # ─── TIME MONITOR ─────────────────────────────────────────────────────────
+    # ─── TIME MONITOR 
 
     async def monitor_time_limit():
         nonlocal buffer_warning_sent
@@ -900,7 +907,7 @@ async def interview_ws(
                 await send_end_and_close()
                 break
 
-    # ─── STT + AUDIO-SAVE (keepalive-wrapped) ────────────────────────────────
+    # ─── STT + AUDIO-SAVE (keepalive-wrapped) 
 
     async def transcribe_and_save(
         audio_bytes_snapshot: bytes, current_q_idx: int
@@ -923,7 +930,7 @@ async def interview_ws(
             print(f"[WS {session_id}] STT/save failed: {e}")
             return None, ""
 
-    # ─── PROCESS ANSWER → NEXT QUESTION ──────────────────────────────────────
+    # ─── PROCESS ANSWER → NEXT QUESTION 
 
     async def process_answer_and_get_next(
         answer_text: str,
@@ -1009,7 +1016,7 @@ async def interview_ws(
 
         await send_question(next_q)
 
-    # ─── START: RECONNECT PATH ────────────────────────────────────────────────
+    # ─── START: RECONNECT PATH 
 
     time_monitor_task = None
 
@@ -1072,7 +1079,7 @@ async def interview_ws(
             db.close()
             return
 
-    # ─── START: FRESH PATH ────────────────────────────────────────────────────
+    # ─── START: FRESH PATH 
 
     else:
         print(f"[WS {session_id}] Fresh connection")
@@ -1105,23 +1112,13 @@ async def interview_ws(
         print(f"[WS {session_id}] ⏱ Timer started, sending first question")
         await send_question(first_q)
 
-    # ─── MAIN RECEIVE LOOP ────────────────────────────────────────────────────
-    #
-    # FIX: ws.receive() returns a dict with a "type" field. When the client
-    # disconnects, Starlette delivers {"type": "websocket.disconnect", ...}.
-    # The old code ignored this dict and looped back, calling ws.receive()
-    # again — which raises:
-    #   RuntimeError: Cannot call "receive" once a disconnect message has been received.
-    #
-    # Fix: check msg["type"] == "websocket.disconnect" and break immediately.
-    # Also catch RuntimeError in the except block as a safety net for any
-    # edge case where the disconnect arrives without a prior dict message.
+    # ─── MAIN RECEIVE LOOP
 
     try:
         while socket_open:
             msg = await ws.receive()
 
-            # ── FIX: exit cleanly on disconnect message ────────────────────
+            # ── FIX: exit cleanly on disconnect message 
             if msg.get("type") == "websocket.disconnect":
                 print(f"[WS {session_id}] Disconnect message received, exiting loop")
                 socket_open = False
@@ -1130,13 +1127,13 @@ async def interview_ws(
             if session.is_finalized:
                 continue
 
-            # ── Binary: PCM audio ──────────────────────────────────────────
+            # ── Binary: PCM audio 
             if msg.get("bytes"):
                 if accepting_audio and session.expecting_answer:
                     audio_buffer.extend(msg["bytes"])
                 continue
 
-            # ── Text: JSON action ──────────────────────────────────────────
+            # ── Text: JSON action 
             if not msg.get("text"):
                 continue
 
@@ -1207,9 +1204,6 @@ async def interview_ws(
         socket_open = False
 
     except RuntimeError as e:
-        # Safety net: Starlette raises RuntimeError if receive() is called after
-        # a disconnect message has already been delivered. We treat this the same
-        # as a clean disconnect — preserve session state in Redis for reconnect.
         if "disconnect" in str(e).lower() or "receive" in str(e).lower():
             print(f"[WS {session_id}] Client disconnected (RuntimeError: {e})")
         else:
@@ -1224,7 +1218,7 @@ async def interview_ws(
         traceback.print_exc()
         socket_open = False
 
-    # ─── FINALLY: cleanup ─────────────────────────────────────────────────────
+    # ─── FINALLY: cleanup 
 
     finally:
         if time_monitor_task:
@@ -1272,7 +1266,7 @@ async def interview_ws(
                 except Exception as e:
                     print(f"[WS {session_id}] DB complete on disconnect failed: {e}")
                 finally:
-                    fresh_db.close()   # FIX: was never closed in original code
+                    fresh_db.close()
 
         except Exception as e:
             print(f"[WS {session_id}] Error in disconnect handler: {e}")
