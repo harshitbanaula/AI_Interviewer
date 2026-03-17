@@ -7,6 +7,7 @@ from app.services.resume_parser import parse_resume
 from app.services.job_inference import infer_job_description
 from app.repository import db_create_session
 from app.core.rate_limiter import RateLimit
+from app.services.session_auth import create_session_token
 from uuid import uuid4
 from dotenv import load_dotenv
 import re
@@ -31,6 +32,7 @@ MIN_FILE_SIZE      = 1024
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
 # ── Rate limit: 5 resume uploads per 10 minutes per IP 
+
 _upload_limit = RateLimit("upload_resume", max_requests=5, window_seconds=600)
 
 
@@ -42,6 +44,7 @@ def startup():
 
 
 # ── Routers 
+
 app.include_router(ws_router)
 app.include_router(finalize.router)
 
@@ -157,6 +160,9 @@ async def upload_resume(
         print(f" Memory session created: {session_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
+    
+    # Generate WS access token----------------
+    token = create_session_token(session_id)
 
     # ── Create session in DB 
     try:
@@ -182,11 +188,12 @@ async def upload_resume(
     return JSONResponse(
         status_code=201,
         content={
-            "session_id":      session_id,
+            "session_id": session_id,
+            "token": token,
             "job_description": job_description,
             "candidate_name":  candidate_name,
-            "status":          "success",
-            "message":         "Resume uploaded successfully",
+            "status": "success",
+            "message": "Resume uploaded successfully",
         }
     )
 
