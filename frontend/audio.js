@@ -16,6 +16,7 @@ const FULLSCREEN_WARN_SECONDS = 30;
  // STATE
 
 let sessionId      = null;
+let sessionToken   = null;
 let interviewEnded = false;
 let isDiscarding   = false;
 
@@ -987,7 +988,12 @@ async function uploadResume() {
         const res  = await fetch(`${API_URL_BASE}/upload_resume`, { method: "POST", body: formData });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || data.detail || "Upload failed");
+        if (data.error) throw new Error(data.error);
+        if (!data.session_id || !data.token) {
+            throw new Error("Server did not return a valid session. Please try again.");
+        }
         log(`Resume uploaded. Session: ${data.session_id}`, "success");
+        sessionToken = data.token;
         return data.session_id;
     } catch (err) {
         log(`Upload failed: ${err.message}`, "error");
@@ -1108,7 +1114,7 @@ function connectWebSocket() {
     }
     if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
 
-    const wsUrl = `${WS_URL_BASE}?session_id=${sessionId}`;
+    const wsUrl = `${WS_URL_BASE}?session_id=${sessionId}&token=${sessionToken}`;
     log(`Connecting WebSocket: ${wsUrl}`, "info");
     ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
@@ -1536,6 +1542,7 @@ function resetInterviewState() {
     warned5Min            = false;
     bufferWarningShown    = false;
     reconnectAttempts     = 0;
+    sessionToken          = null;
 
     fullscreenActive                = false;
     fullscreenExitedDuringInterview = false;
