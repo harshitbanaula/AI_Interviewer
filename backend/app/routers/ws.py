@@ -846,8 +846,9 @@ async def interview_ws(
     # ─── DB ANSWER SAVE (runs in thread pool) 
 
     def _save_answer_to_db(question_index, answer_text, audio_path, is_skipped):
+        fresh_db = SessionLocal()
         try:
-            score         = session.scores[-1] if session.scores else {}
+            score = session.scores[-1] if session.scores else {}
             question_text = (
                 session.questions[question_index - 1]
                 if question_index <= len(session.questions) else ""
@@ -855,7 +856,7 @@ async def interview_ws(
             duration = session.answer_durations[-1] if session.answer_durations else 0.0
 
             db_save_answer(
-                db=db,
+                db=fresh_db,
                 session_id=session_id,
                 question_index=question_index,
                 question_text=question_text,
@@ -869,6 +870,8 @@ async def interview_ws(
             )
         except Exception as e:
             print(f"[DB ERROR] save_answer Q{question_index}: {e}")
+        finally:
+            fresh_db.close()
 
     # ─── TIME MONITOR 
 
@@ -942,79 +945,85 @@ async def interview_ws(
 
         is_processing = True
 
-        # Acknowledge receipt immediately
-        if socket_open:
-            await safe_send_json({
-                "type": "FINAL_TRANSCRIPT",
-                "text": "Question skipped" if is_skipped else answer_text,
-            })
-
-        # Score with keepalive
         try:
-            score_task = asyncio.create_task(
-                run_blocking(score_answer, answer_text, session.questions[-1])
-            )
-            score = await with_keepalive(score_task)
-            print(f"[PERF] Score: {score['final_score']:.2f}")
-        except Exception as e:
-            print(f"[WS {session_id}] Scoring failed, using fallback: {e}")
-            score = {
-                "relevance": 0.5, "technical_accuracy": 0.5,
-                "completeness": 0.5, "clarity": 0.5,
-                "final_score": 0.5, "strengths": [],
-                "improvements": ["Automatic evaluation failed — manual review needed."],
-                "is_non_answer": False,
-            }
 
-        # Write into session (lock-protected)
-        with session._state_lock:
-            if not session.is_finalized and session.expecting_answer:
-                duration = (
-                    round(time.time() - session.current_question_start, 2)
-                    if session.current_question_start else 0.0
+            # Acknowledge receipt immediately
+            if socket_open:
+                await safe_send_json({
+                    "type": "FINAL_TRANSCRIPT",
+                    "text": "Question skipped" if is_skipped else answer_text,
+                })
+
+            # Score with keepalive
+            try:
+                score_task = asyncio.create_task(
+                    run_blocking(score_answer, answer_text, session.questions[-1])
                 )
-                session.answer_durations.append(duration)
-                session.current_question_start = None
-                session.answers.append(answer_text)
-                session.scores.append(score)
-                classification = session._classify_answer(score["final_score"])
-                session.stage  = session._decide_next_stage(
-                    session.current_topic, classification
+                score = await with_keepalive(score_task)
+                print(f"[PERF] Score: {score['final_score']:.2f}")
+            except Exception as e:
+                print(f"[WS {session_id}] Scoring failed, using fallback: {e}")
+                score = {
+                    "relevance": 0.5, "technical_accuracy": 0.5,
+                    "completeness": 0.5, "clarity": 0.5,
+                    "final_score": 0.5, "strengths": [],
+                    "improvements": ["Automatic evaluation failed — manual review needed."],
+                    "is_non_answer": False,
+                }
+
+            # Write into session (lock-protected)
+            with session._state_lock:
+                if not session.is_finalized and session.expecting_answer:
+                    duration = (
+                        round(time.time() - session.current_question_start, 2)
+                        if session.current_question_start else 0.0
+                    )
+                    session.answer_durations.append(duration)
+                    session.current_question_start = None
+                    session.answers.append(answer_text)
+                    session.scores.append(score)
+                    classification = session._classify_answer(score["final_score"])
+                    session.stage  = session._decide_next_stage(
+                        session.current_topic, classification
+                    )
+                    session.expecting_answer = False
+
+            _save_session(session_id, session)
+
+            # DB save in background
+            asyncio.create_task(
+                run_blocking(
+                    _save_answer_to_db, current_q_idx, answer_text, audio_path, is_skipped
                 )
-                session.expecting_answer = False
-
-        _save_session(session_id, session)
-
-        # DB save in background
-        asyncio.create_task(
-            run_blocking(
-                _save_answer_to_db, current_q_idx, answer_text, audio_path, is_skipped
             )
-        )
 
-        # End check
-        if session.is_finalized or session._question_limit_reached():
-            await send_end_and_close()
-            return
+            # End check
+            if session.is_finalized or session._question_limit_reached():
+                await send_end_and_close()
+                return
 
-        # Generate next question with keepalive
-        print(f"[PERF] Generating next question…")
-        t0 = time.time()
-        try:
-            question_task = asyncio.create_task(run_blocking(session.next_question))
-            next_q = await with_keepalive(question_task)
-        except Exception as e:
-            print(f"[WS {session_id}] Question generation failed: {e}")
-            next_q = None
+            # Generate next question with keepalive
+            print(f"[PERF] Generating next question…")
+            t0 = time.time()
+            try:
+                question_task = asyncio.create_task(run_blocking(session.next_question))
+                next_q = await with_keepalive(question_task)
+            except Exception as e:
+                print(f"[WS {session_id}] Question generation failed: {e}")
+                next_q = None
 
-        _save_session(session_id, session)
-        print(f"[PERF] Question in {time.time() - t0:.2f}s")
+            _save_session(session_id, session)
+            print(f"[PERF] Question in {time.time() - t0:.2f}s")
 
-        if not next_q:
-            await send_end_and_close()
-            return
+            if not next_q:
+                await send_end_and_close()
+                return
 
-        await send_question(next_q)
+            await send_question(next_q)
+
+        finally:
+            is_processing = False
+        
 
     # ─── START: RECONNECT PATH 
 
