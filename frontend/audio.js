@@ -96,9 +96,9 @@ window.addEventListener("beforeunload", (e) => {
 
 // LOCAL-STORAGE HELPERS
 
-function saveSessionToStorage(sid) {
+function saveSessionToStorage(sid, token) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessionId: sid }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessionId: sid, sessionToken: token || null }));
     } catch (e) {
         log(`localStorage write failed: ${e.message}`, "warning");
     }
@@ -111,6 +111,16 @@ function loadSessionFromStorage() {
         const data = JSON.parse(raw);
         return data?.sessionId || null;
     } catch (e) {
+        return null;
+    }
+}
+function loadTokenFromStorage(){
+    try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        return data?.sessionToken || null;
+    } catch (e){
         return null;
     }
 }
@@ -1114,6 +1124,9 @@ function connectWebSocket() {
     }
     if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
 
+    if (!sessionToken){
+        sessionToken = loadTokenFromStorage();
+    }
     const wsUrl = `${WS_URL_BASE}?session_id=${sessionId}&token=${sessionToken}`;
     log(`Connecting WebSocket: ${wsUrl}`, "info");
     ws = new WebSocket(wsUrl);
@@ -1275,7 +1288,7 @@ function connectWebSocket() {
         if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
 
         if (sessionId && !interviewEnded && !isDiscarding) {
-            saveSessionToStorage(sessionId);
+            saveSessionToStorage(sessionId, sessionToken);
         }
 
         // Interview already done — nothing to do
@@ -1373,7 +1386,7 @@ async function startInterview() {
         transcript.innerHTML = "";
         return;
     }
-    saveSessionToStorage(sessionId);
+    saveSessionToStorage(sessionId, sessionToken);
     log(`Resume uploaded, session: ${sessionId}`, "success");
 
     // ── Step 2: Open mic stream BEFORE fullscreen ─────────────────────────
@@ -1457,7 +1470,8 @@ async function resumeInterview(existingSessionId) {
 
     isRunning = true;
     sessionId = existingSessionId;
-    saveSessionToStorage(sessionId);
+    sessionToken = loadTokenFromStorage();
+    saveSessionToStorage(sessionId, sessionToken);
 
     const transcript = document.getElementById("transcript");
     transcript.innerHTML = `
@@ -1496,6 +1510,7 @@ function discardInterruptedSession() {
     interviewEnded = true;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     sessionId = null;
+    sessionToken = null;
     clearSessionFromStorage();
     isDiscarding = false;
 }
