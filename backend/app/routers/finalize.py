@@ -4,6 +4,7 @@ from typing import Optional
 from app.services.interview_state import get_session, delete_session, _save_session
 from app.repository import db_complete_session
 from app.database import SessionLocal
+from app. services.session_auth import delete_session_token
 
 router = APIRouter()
 
@@ -29,7 +30,6 @@ async def finalize_session(body : FinalizeRequest):
     if len(session.questions) == 0:
         raise HTTPException(status_code= 400, detail="No Questions were answered. Cannot finalize an empty session.")
     
-    time_expired = completion_reason in ("fullscreen_exit","tab_closed")
 
     try:
         session.finalize(False)
@@ -55,6 +55,7 @@ async def finalize_session(body : FinalizeRequest):
  
     # clean up redis
     delete_session(session_id)
+    delete_session_token(session_id)
 
     print(f"[FINALIZE REST] Session {session_id} finalized via REST — {summary.get('result', 'N/A')}")
 
