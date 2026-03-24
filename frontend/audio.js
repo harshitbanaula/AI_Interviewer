@@ -200,7 +200,6 @@ window.addEventListener("beforeunload", (e) => {
 // and sees interviewEnded = true → fullscreen warning never shows.
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden" && isRunning && !interviewEnded) {
-        interviewEnded = true;
         autoSubmitInterview("tab_hidden");
     }
 });
@@ -595,6 +594,11 @@ function dismissFullscreenWarning() {
 // AUTO-SUBMIT
 
 async function autoSubmitInterview(reason = "unknown") {
+    if (interviewEnded){
+        log("autosubmit: already ended, skipping","warning");
+        return;
+    }
+    interviewEnded = true;
     const sid = sessionId || loadSessionFromStorage();
     if (!sid) { log("autoSubmit: no session ID found", "warning"); return; }
 
@@ -631,36 +635,50 @@ async function autoSubmitInterview(reason = "unknown") {
             <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
     }
 
-    try {
-        const res = await fetch(`${API_URL_BASE}/finalize_session`, {
-            method  : "POST",
-            headers : { "Content-Type": "application/json" },
-            body    : JSON.stringify({ session_id: sid, completion_reason: reason }),
-        });
+    let lastErr = null;
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            if (attempt > 1) {
+                log(`Auto-submit retry ${attempt}/3…`, "warning");
+                await new Promise(r => setTimeout(r, attempt * 1000));
+            }
 
-        showToast(`Interview auto-submitted (${reason.replace(/_/g, " ")}).`, "warning");
-        displayResults(data.summary);
-        log("Auto-submit completed successfully", "success");
+            const res = await fetch(`${API_URL_BASE}/finalize_session`, {
+                method  : "POST",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify({ session_id: sid, completion_reason: reason }),
+            });
 
-    } catch (err) {
-        log(`Auto-submit failed: ${err.message}`, "error");
-        if (transcript) {
-            transcript.innerHTML = `
-                <div style="padding:40px;text-align:center;">
-                    <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
-                    <div style="color:#dc2626;font-size:20px;font-weight:800;">
-                        Interview Ended
-                    </div>
-                    <div style="color:#6b7280;font-size:14px;margin-top:10px;line-height:1.6;">
-                        Auto-submission failed: ${err.message}<br/>
-                        Please contact the recruiter with your session ID:<br/>
-                        <strong style="font-family:monospace;font-size:12px;">${sid}</strong>
-                    </div>
-                </div>`;
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+            showToast(`Interview submitted (${reason.replace(/_/g, " ")}).`, "warning");
+            displayResults(data.summary);
+            log("Auto-submit completed successfully", "success");
+            return;
+
+        } catch (err) {
+            lastErr = err;
+            log(`Auto-submit attempt ${attempt} failed: ${err.message}`, "error");
         }
+    }
+
+    // All 3 attempts failed
+    log(`Auto-submit failed after 3 attempts: ${lastErr.message}`, "error");
+    if (transcript) {
+        transcript.innerHTML = `
+            <div style="padding:40px;text-align:center;">
+                <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
+                <div style="color:#dc2626;font-size:20px;font-weight:800;">
+                    Submission Failed
+                </div>
+                <div style="color:#6b7280;font-size:14px;margin-top:10px;line-height:1.6;">
+                    We tried 3 times but could not submit your interview.<br/>
+                    Your session is still saved. Please contact the recruiter with:<br/>
+                    <strong style="font-family:monospace;font-size:12px;">${sid}</strong>
+                </div>
+            </div>`;
     }
 }
 
@@ -730,9 +748,7 @@ function showResumeBanner(interruptedSessionId) {
     });
 }
 
-function hideResumeBanner() {
-    document.getElementById("resume-banner")?.remove();
-}
+
 
 
 // ABANDON CONFIRMATION
@@ -823,10 +839,14 @@ async function submitInterruptedSession(interruptedSessionId) {
     skipBtn.disabled   = true;
 
     try {
-        const res = await fetch(
-            `${API_URL_BASE}/finalize_session?session_id=${interruptedSessionId}`,
-            { method: "POST" }
-        );
+        const res = await fetch(`${API_URL_BASE}/finalize_session`, {
+            method  : "POST",
+            headers : { "Content-Type": "application/json" },
+            body    : JSON.stringify({
+                session_id        : interruptedSessionId,
+                completion_reason : "manual_submit",
+            }),
+        });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "Finalization failed");
 
@@ -1045,20 +1065,6 @@ function resetSilenceTimer() {
     }, SILENCE_DELAY_MS);
 }
 
-
-// MIC PERMISSION PRE-WARM
-
-async function prewarmMicPermission() {
-    try {
-        const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        testStream.getTracks().forEach(t => t.stop());
-        log("Mic permission pre-granted", "success");
-        return true;
-    } catch (err) {
-        log(`Mic permission denied during pre-warm: ${err.message}`, "error");
-        return false;
-    }
-}
 
 
 // RESUME UPLOAD
