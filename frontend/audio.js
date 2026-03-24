@@ -72,90 +72,320 @@ function showInstructionsModal() {
         overlay.id = "instructions-overlay";
         overlay.style.cssText = `
             position:fixed;inset:0;z-index:99998;
-            background:rgba(0,0,0,0.80);
+            background:rgba(0,0,0,0.85);
             display:flex;align-items:center;justify-content:center;
             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;`;
 
         overlay.innerHTML = `
             <div style="
                 background:#0f172a;border:1px solid #1e293b;
-                border-radius:20px;padding:40px;max-width:540px;width:90%;
+                border-radius:20px;padding:40px;max-width:620px;width:90%;
                 max-height:90vh;overflow-y:auto;
                 box-shadow:0 32px 80px rgba(0,0,0,0.7);">
 
-                <div style="font-size:22px;font-weight:800;color:#f1f5f9;
-                            margin-bottom:6px;letter-spacing:-0.4px;">
-                    Before You Begin
-                </div>
-                <div style="font-size:13px;color:#94a3b8;margin-bottom:28px;">
-                    Read these instructions carefully before starting your interview.
-                </div>
-
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px;">
-
-                    <div style="background:#0d2d1a;border:1px solid #15803d;
-                                border-radius:12px;padding:16px;">
-                        <div style="font-size:13px;font-weight:700;color:#22c55e;
-                                    margin-bottom:12px;">✅ Do</div>
-                        <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;">
-                            <li style="font-size:12px;color:#86efac;line-height:1.5;">Speak clearly and at a normal pace</li>
-                            <li style="font-size:12px;color:#86efac;line-height:1.5;">Stay in fullscreen for the entire interview</li>
-                            <li style="font-size:12px;color:#86efac;line-height:1.5;">Answer in English only</li>
-                            <li style="font-size:12px;color:#86efac;line-height:1.5;">Use Skip if you do not know an answer</li>
-                            <li style="font-size:12px;color:#86efac;line-height:1.5;">Keep this as your only open browser tab</li>
-                        </ul>
+                <div style="text-align:center;margin-bottom:28px;">
+                    <div style="font-size:32px;margin-bottom:10px;">📋</div>
+                    <div style="font-size:22px;font-weight:800;color:#f1f5f9;
+                                letter-spacing:-0.4px;margin-bottom:6px;">
+                        Interview Instructions
                     </div>
-
-                    <div style="background:#2d0d0d;border:1px solid #be123c;
-                                border-radius:12px;padding:16px;">
-                        <div style="font-size:13px;font-weight:700;color:#f43f5e;
-                                    margin-bottom:12px;">❌ Don't</div>
-                        <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;">
-                            <li style="font-size:12px;color:#fca5a5;line-height:1.5;">Do not exit fullscreen during the interview</li>
-                            <li style="font-size:12px;color:#fca5a5;line-height:1.5;">Do not close or refresh the tab</li>
-                            <li style="font-size:12px;color:#fca5a5;line-height:1.5;">Do not use another device or person to help</li>
-                            <li style="font-size:12px;color:#fca5a5;line-height:1.5;">Do not switch to another application</li>
-                            <li style="font-size:12px;color:#fca5a5;line-height:1.5;">Do not use notes or reference material</li>
-                        </ul>
-                    </div>
-
-                </div>
-
-                <div style="background:#1e293b;border-radius:10px;
-                            padding:14px 16px;margin-bottom:28px;">
-                    <div style="font-size:12px;color:#94a3b8;line-height:1.7;">
-                        ⏱️ You have <strong style="color:#f1f5f9;">45 minutes</strong> for the main interview
-                        + <strong style="color:#f1f5f9;">2 minutes</strong> buffer time.<br/>
-                        📋 You will be asked up to <strong style="color:#f1f5f9;">10 questions</strong>
-                        based on your resume.<br/>
-                        🎤 Your answers are recorded via microphone and
-                        <strong style="color:#f1f5f9;">auto-submitted after 10 seconds of silence.</strong><br/>
-                        🔲 Exiting fullscreen starts a
-                        <strong style="color:#fbbf24;">30-second countdown</strong>
-                        — if you don't return, the interview auto-submits.
+                    <div style="font-size:13px;color:#64748b;">
+                        Please read and acknowledge each instruction before proceeding.
+                        All boxes must be checked to begin.
                     </div>
                 </div>
 
-                <div style="display:flex;gap:12px;">
+                <style>
+                    .instr-item {
+                        display:flex;align-items:flex-start;gap:14px;
+                        padding:13px 16px;border-radius:10px;
+                        border:1px solid #1e293b;margin-bottom:8px;
+                        cursor:pointer;transition:background 0.15s,border-color 0.15s;
+                        user-select:none;
+                    }
+                    .instr-item:hover { background:#1e293b; border-color:#334155; }
+                    .instr-item.checked { background:#0d2d1a; border-color:#15803d; }
+                    .instr-cb {
+                        width:20px;height:20px;min-width:20px;
+                        border:2px solid #334155;border-radius:5px;
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:13px;transition:all 0.15s;margin-top:1px;
+                        background:#0f172a;
+                    }
+                    .instr-item.checked .instr-cb {
+                        background:#15803d;border-color:#15803d;
+                    }
+                    .instr-label {
+                        font-size:13px;color:#94a3b8;line-height:1.6;
+                    }
+                    .instr-item.checked .instr-label { color:#86efac; }
+                    .instr-tag {
+                        font-size:10px;font-weight:700;padding:2px 7px;
+                        border-radius:4px;display:inline-block;margin-bottom:4px;
+                    }
+
+                    .accept-row {
+                        display:flex;align-items:flex-start;gap:14px;
+                        padding:16px;border-radius:12px;
+                        border:2px solid #334155;margin-top:6px;
+                        cursor:pointer;transition:all 0.15s;
+                        background:#0f172a;user-select:none;
+                    }
+                    .accept-row:hover { border-color:#6366f1;background:#1e1b4b; }
+                    .accept-row.checked { background:#1e1b4b;border-color:#6366f1; }
+                    .accept-cb {
+                        width:22px;height:22px;min-width:22px;
+                        border:2px solid #334155;border-radius:6px;
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:14px;transition:all 0.15s;margin-top:1px;
+                        background:#0f172a;
+                    }
+                    .accept-row.checked .accept-cb {
+                        background:#6366f1;border-color:#6366f1;
+                    }
+                </style>
+
+                <!-- ENVIRONMENT -->
+                <div style="font-size:11px;font-weight:700;color:#475569;
+                            text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
+                    🖥️ Environment &amp; Setup
+                </div>
+
+                <div class="instr-item" data-idx="0">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#1e3a5f;color:#60a5fa;">Required</span><br/>
+                        I am in a <strong style="color:#e2e8f0;">quiet, distraction-free environment</strong> with good lighting and a stable internet connection.
+                    </div>
+                </div>
+
+                <div class="instr-item" data-idx="1">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#1e3a5f;color:#60a5fa;">Required</span><br/>
+                        My <strong style="color:#e2e8f0;">microphone is working</strong> and I have allowed microphone access in my browser. I will speak clearly at a normal pace.
+                    </div>
+                </div>
+
+                <div class="instr-item" data-idx="2">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#1e3a5f;color:#60a5fa;">Required</span><br/>
+                        I will keep this as my <strong style="color:#e2e8f0;">only open browser tab</strong> for the entire duration of the interview.
+                    </div>
+                </div>
+
+                <!-- CONDUCT -->
+                <div style="font-size:11px;font-weight:700;color:#475569;
+                            text-transform:uppercase;letter-spacing:1px;
+                            margin-bottom:10px;margin-top:20px;">
+                    🎯 Interview Conduct
+                </div>
+
+                <div class="instr-item" data-idx="3">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#422006;color:#fb923c;">Important</span><br/>
+                        I will answer all questions <strong style="color:#e2e8f0;">in English only</strong>, using my own knowledge without assistance from any person, AI tool, or reference material.
+                    </div>
+                </div>
+
+                <div class="instr-item" data-idx="4">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#422006;color:#fb923c;">Important</span><br/>
+                        I understand that if I <strong style="color:#e2e8f0;">do not know an answer</strong>, I should use the <strong style="color:#e2e8f0;">Skip button</strong> rather than staying silent. Silence for 10 seconds auto-submits my current answer.
+                    </div>
+                </div>
+
+                <div class="instr-item" data-idx="5">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#422006;color:#fb923c;">Important</span><br/>
+                        I will <strong style="color:#e2e8f0;">not use notes, books, or any external help</strong> during the interview. This interview must reflect my genuine knowledge and skills.
+                    </div>
+                </div>
+
+                <!-- PROCTORING -->
+                <div style="font-size:11px;font-weight:700;color:#475569;
+                            text-transform:uppercase;letter-spacing:1px;
+                            margin-bottom:10px;margin-top:20px;">
+                    🔒 Proctoring &amp; Security
+                </div>
+
+                <div class="instr-item" data-idx="6">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#4a0d0d;color:#f87171;">Critical</span><br/>
+                        I must remain in <strong style="color:#e2e8f0;">fullscreen mode</strong> for the entire interview. Exiting fullscreen starts a <strong style="color:#fbbf24;">30-second countdown</strong> — if I do not return, my interview will be automatically submitted.
+                    </div>
+                </div>
+
+                <div class="instr-item" data-idx="7">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#4a0d0d;color:#f87171;">Critical</span><br/>
+                        <strong style="color:#e2e8f0;">Switching tabs, minimizing the browser, or closing this tab</strong> will immediately and permanently submit my interview with no way to continue.
+                    </div>
+                </div>
+
+                <div class="instr-item" data-idx="8">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#4a0d0d;color:#f87171;">Critical</span><br/>
+                        All violations including fullscreen exits and tab switches are <strong style="color:#e2e8f0;">recorded and included in my interview report</strong> sent to the recruiter.
+                    </div>
+                </div>
+
+                <!-- TIMING -->
+                <div style="font-size:11px;font-weight:700;color:#475569;
+                            text-transform:uppercase;letter-spacing:1px;
+                            margin-bottom:10px;margin-top:20px;">
+                    ⏱️ Timing &amp; Format
+                </div>
+
+                <div class="instr-item" data-idx="9">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#1e293b;color:#94a3b8;">Info</span><br/>
+                        I have <strong style="color:#e2e8f0;">45 minutes</strong> for the main interview plus a <strong style="color:#e2e8f0;">2-minute buffer</strong>. I will be asked up to <strong style="color:#e2e8f0;">10 questions</strong> based on my resume. Questions are delivered via audio — I must have my volume on.
+                    </div>
+                </div>
+
+                <div class="instr-item" data-idx="10">
+                    <div class="instr-cb"></div>
+                    <div class="instr-label">
+                        <span class="instr-tag" style="background:#1e293b;color:#94a3b8;">Info</span><br/>
+                        WiFi drops and brief reconnections are <strong style="color:#e2e8f0;">safe</strong> — my session and progress are preserved automatically. I do not need to restart the interview if my connection briefly drops.
+                    </div>
+                </div>
+
+                <!-- PROGRESS -->
+                <div style="margin:24px 0 16px;padding:12px 16px;
+                            background:#0f172a;border:1px solid #1e293b;border-radius:10px;
+                            display:flex;align-items:center;justify-content:space-between;">
+                    <div style="font-size:12px;color:#64748b;">
+                        Instructions acknowledged:
+                        <span id="instr-count" style="color:#f1f5f9;font-weight:700;">0</span>
+                        / 11
+                    </div>
+                    <div style="width:160px;height:6px;background:#1e293b;border-radius:3px;overflow:hidden;">
+                        <div id="instr-progress-bar" style="
+                            height:100%;width:0%;background:#15803d;
+                            border-radius:3px;transition:width 0.25s ease;"></div>
+                    </div>
+                </div>
+
+                <!-- FINAL ACCEPTANCE CHECKBOX -->
+                <div class="accept-row" id="accept-row" style="pointer-events:none;opacity:0.4;">
+                    <div class="accept-cb" id="accept-cb"></div>
+                    <div style="font-size:13px;color:#a5b4fc;line-height:1.6;">
+                        <strong style="color:#e2e8f0;">I have read all the instructions above and I accept them.</strong><br/>
+                        I understand that any violation may result in automatic submission or disqualification from this interview process.
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:12px;margin-top:20px;">
                     <button id="instructions-cancel" style="
                         flex:1;padding:14px;border-radius:10px;
                         background:none;border:1px solid #334155;
                         color:#94a3b8;font-size:14px;font-weight:600;cursor:pointer;">
                         Cancel
                     </button>
-                    <button id="instructions-start" style="
+                    <button id="instructions-start" disabled style="
                         flex:2;padding:14px;border-radius:10px;
-                        background:linear-gradient(135deg,#6366f1,#8b5cf6);
-                        border:none;color:white;font-size:14px;
-                        font-weight:700;cursor:pointer;">
-                        I Understand — Continue
+                        background:#334155;border:none;color:#64748b;
+                        font-size:14px;font-weight:700;cursor:not-allowed;
+                        transition:all 0.2s;">
+                        ✓ Accept &amp; Continue
                     </button>
+                </div>
+
+                <div id="instr-hint" style="
+                    text-align:center;font-size:11px;color:#475569;
+                    margin-top:12px;">
+                    ☝️ Please check all boxes above to continue
                 </div>
             </div>`;
 
         document.body.appendChild(overlay);
 
+        const TOTAL = 11;
+        const checked = new Array(TOTAL).fill(false);
+        let acceptChecked = false;
+
+        const items       = overlay.querySelectorAll(".instr-item");
+        const acceptRow   = overlay.getElementById ? overlay.getElementById("accept-row") : document.getElementById("accept-row");
+        const acceptCb    = document.getElementById("accept-cb");
+        const startBtn_   = document.getElementById("instructions-start");
+        const countEl     = document.getElementById("instr-count");
+        const progressBar = document.getElementById("instr-progress-bar");
+        const hintEl      = document.getElementById("instr-hint");
+
+        function updateProgress() {
+            const doneCount = checked.filter(Boolean).length;
+            const allDone   = doneCount === TOTAL;
+
+            countEl.textContent        = doneCount;
+            progressBar.style.width    = `${(doneCount / TOTAL) * 100}%`;
+            progressBar.style.background = allDone ? "#6366f1" : "#15803d";
+
+            // Unlock accept row when all instructions checked
+            const acceptRowEl = document.getElementById("accept-row");
+            if (allDone) {
+                acceptRowEl.style.pointerEvents = "auto";
+                acceptRowEl.style.opacity       = "1";
+            } else {
+                acceptRowEl.style.pointerEvents = "none";
+                acceptRowEl.style.opacity       = "0.4";
+                // Reset accept if an instruction is unchecked
+                acceptChecked = false;
+                acceptCb.textContent = "";
+                acceptRowEl.classList.remove("checked");
+            }
+
+            // Enable start only when all instructions + accept are checked
+            const canStart = allDone && acceptChecked;
+            startBtn_.disabled   = !canStart;
+            startBtn_.style.background  = canStart
+                ? "linear-gradient(135deg,#6366f1,#8b5cf6)"
+                : "#334155";
+            startBtn_.style.color       = canStart ? "white" : "#64748b";
+            startBtn_.style.cursor      = canStart ? "pointer" : "not-allowed";
+
+            hintEl.textContent = canStart
+                ? "✅ All instructions acknowledged — you may proceed"
+                : allDone
+                ? "☝️ Please check the acceptance box below to continue"
+                : `☝️ ${TOTAL - doneCount} instruction${TOTAL - doneCount !== 1 ? "s" : ""} remaining`;
+            hintEl.style.color = canStart ? "#22c55e" : "#475569";
+        }
+
+        // Instruction item click handlers
+        items.forEach((item, i) => {
+            item.addEventListener("click", () => {
+                checked[i] = !checked[i];
+                item.classList.toggle("checked", checked[i]);
+                const cb = item.querySelector(".instr-cb");
+                cb.textContent = checked[i] ? "✓" : "";
+                cb.style.color = "#fff";
+                updateProgress();
+            });
+        });
+
+        // Accept row click handler
+        document.getElementById("accept-row").addEventListener("click", () => {
+            if (checked.filter(Boolean).length !== TOTAL) return;
+            acceptChecked = !acceptChecked;
+            acceptCb.textContent = acceptChecked ? "✓" : "";
+            acceptCb.style.color = "#fff";
+            document.getElementById("accept-row").classList.toggle("checked", acceptChecked);
+            updateProgress();
+        });
+
+        // Buttons
         document.getElementById("instructions-start").addEventListener("click", () => {
+            if (!checked.every(Boolean) || !acceptChecked) return;
             overlay.remove();
             resolve();
         });
@@ -164,6 +394,8 @@ function showInstructionsModal() {
             overlay.remove();
             reject(new Error("Candidate cancelled at instructions"));
         });
+
+        updateProgress();
     });
 }
 
@@ -329,114 +561,174 @@ function showToast(message, type = "info") {
 // FULLSCREEN GATE MODAL
 
 function showFullscreenGate() {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         document.getElementById("fs-gate-overlay")?.remove();
+
+        // Enter fullscreen FIRST — content appears inside fullscreen
+        await enterFullscreen();
+        await new Promise(r => setTimeout(r, 200));
+
+        // If browser denied fullscreen, show error inside whatever state we are in
+        const inFs = isInFullscreen();
 
         const overlay = document.createElement("div");
         overlay.id = "fs-gate-overlay";
         overlay.style.cssText = `
             position:fixed;inset:0;z-index:99999;
-            background:rgba(0,0,0,0.82);
+            background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 100%);
             display:flex;align-items:center;justify-content:center;
             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-            animation:fsGateFadeIn 0.25s ease;`;
+            animation:fsGateFadeIn 0.3s ease;`;
 
         overlay.innerHTML = `
             <style>
                 @keyframes fsGateFadeIn { from{opacity:0} to{opacity:1} }
-                @keyframes fsGatePop    { from{opacity:0;transform:scale(0.92)} to{opacity:1;transform:scale(1)} }
-                #fs-gate-card { animation: fsGatePop 0.3s cubic-bezier(0.34,1.56,0.64,1); }
-                #fs-enter-btn:hover { transform:translateY(-2px); box-shadow:0 8px 28px rgba(99,102,241,0.5) !important; }
-                #fs-cancel-btn:hover { color:#fff !important; }
+                @keyframes fsGatePop { from{opacity:0;transform:scale(0.94)} to{opacity:1;transform:scale(1)} }
+                #fs-gate-card { animation:fsGatePop 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+                #fs-proceed-btn:hover:not(:disabled) {
+                    transform:translateY(-2px);
+                    box-shadow:0 10px 32px rgba(99,102,241,0.55) !important;
+                }
+                #fs-cancel-btn:hover { color:#e2e8f0 !important; }
             </style>
 
             <div id="fs-gate-card" style="
-                background:#0f172a;border:1px solid #1e293b;
-                border-radius:20px;padding:48px 40px;max-width:460px;width:90%;
-                text-align:center;box-shadow:0 32px 80px rgba(0,0,0,0.7);
-                position:relative;">
+                max-width:500px;width:90%;text-align:center;padding:48px 40px;">
 
+                <!-- Icon -->
                 <div style="
-                    width:72px;height:72px;margin:0 auto 24px;
+                    width:80px;height:80px;margin:0 auto 28px;
                     background:linear-gradient(135deg,#6366f1,#8b5cf6);
-                    border-radius:18px;display:flex;align-items:center;
-                    justify-content:center;font-size:34px;
-                    box-shadow:0 8px 24px rgba(99,102,241,0.4);">🔲</div>
-
-                <div style="font-size:22px;font-weight:800;color:#f1f5f9;
-                            margin-bottom:10px;letter-spacing:-0.4px;">
-                    Fullscreen Required
+                    border-radius:22px;display:flex;align-items:center;
+                    justify-content:center;font-size:38px;
+                    box-shadow:0 12px 32px rgba(99,102,241,0.45);">
+                    ${inFs ? "🔲" : "⚠️"}
                 </div>
 
+                <!-- Title -->
+                <div style="font-size:26px;font-weight:800;color:#f1f5f9;
+                            margin-bottom:10px;letter-spacing:-0.5px;">
+                    ${inFs ? "You Are Now in Fullscreen" : "Fullscreen Could Not Be Activated"}
+                </div>
+
+                <!-- Subtitle -->
                 <div style="font-size:14px;color:#94a3b8;line-height:1.75;
-                            margin-bottom:32px;max-width:340px;margin-left:auto;margin-right:auto;">
-                    This interview must be taken in <strong style="color:#e2e8f0;">fullscreen mode</strong>
-                    to ensure a fair and secure environment.<br/><br/>
-                    Exiting fullscreen at any point will trigger a
-                    <strong style="color:#fbbf24;">30-second warning</strong> — if you don't
-                    return, your interview will be auto-submitted.
+                            margin-bottom:36px;max-width:380px;margin-left:auto;margin-right:auto;">
+                    ${inFs
+                        ? `Your interview environment is <strong style="color:#a5b4fc;">secure and ready.</strong>
+                           You must stay in fullscreen for the entire session.<br/><br/>
+                           Leaving fullscreen at any point will trigger a
+                           <strong style="color:#fbbf24;">30-second countdown</strong>
+                           before your interview is automatically submitted.`
+                        : `Your browser blocked fullscreen access. Please click the button below
+                           to try again, or check your browser permissions.`
+                    }
                 </div>
 
-                <div style="display:flex;gap:10px;margin-bottom:32px;text-align:left;">
-                    <div style="flex:1;background:#1e293b;border-radius:10px;padding:14px 12px;
-                                border:1px solid #334155;">
-                        <div style="font-size:18px;margin-bottom:4px;">✅</div>
-                        <div style="font-size:11px;color:#94a3b8;line-height:1.5;">
-                            WiFi drops &amp; reconnects are <strong style="color:#e2e8f0;">safe</strong> — your session is preserved
+                <!-- Info cards -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;
+                            margin-bottom:36px;text-align:left;">
+                    <div style="
+                        background:rgba(255,255,255,0.05);
+                        border:1px solid rgba(255,255,255,0.1);
+                        border-radius:12px;padding:16px 14px;">
+                        <div style="font-size:20px;margin-bottom:8px;">✅</div>
+                        <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+                            WiFi drops and brief reconnects are
+                            <strong style="color:#e2e8f0;">completely safe</strong> —
+                            your session and answers are preserved automatically.
                         </div>
                     </div>
-                    <div style="flex:1;background:#1e293b;border-radius:10px;padding:14px 12px;
-                                border:1px solid #334155;">
-                        <div style="font-size:18px;margin-bottom:4px;">⚠️</div>
-                        <div style="font-size:11px;color:#94a3b8;line-height:1.5;">
-                            Exiting fullscreen starts a <strong style="color:#fbbf24;">30s</strong> countdown to auto-submit
+                    <div style="
+                        background:rgba(255,255,255,0.05);
+                        border:1px solid rgba(255,255,255,0.1);
+                        border-radius:12px;padding:16px 14px;">
+                        <div style="font-size:20px;margin-bottom:8px;">🚨</div>
+                        <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+                            Exiting fullscreen starts a
+                            <strong style="color:#fbbf24;">30-second countdown.</strong>
+                            Switching or closing tabs submits your interview immediately.
+                        </div>
+                    </div>
+                    <div style="
+                        background:rgba(255,255,255,0.05);
+                        border:1px solid rgba(255,255,255,0.1);
+                        border-radius:12px;padding:16px 14px;">
+                        <div style="font-size:20px;margin-bottom:8px;">🎤</div>
+                        <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+                            Speak clearly after each question. 
+                            <strong style="color:#e2e8f0;">10 seconds of silence</strong>
+                            automatically submits your current answer.
+                        </div>
+                    </div>
+                    <div style="
+                        background:rgba(255,255,255,0.05);
+                        border:1px solid rgba(255,255,255,0.1);
+                        border-radius:12px;padding:16px 14px;">
+                        <div style="font-size:20px;margin-bottom:8px;">📋</div>
+                        <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+                            All session activity is
+                            <strong style="color:#e2e8f0;">recorded and reported</strong>
+                            to the recruiter including any violations.
                         </div>
                     </div>
                 </div>
 
-                <button id="fs-enter-btn" style="
-                    width:100%;padding:16px;border:none;border-radius:12px;
-                    background:linear-gradient(135deg,#6366f1,#8b5cf6);
+                <!-- Primary button -->
+                <button id="fs-proceed-btn" style="
+                    width:100%;padding:17px;border:none;border-radius:14px;
+                    background:${inFs
+                        ? "linear-gradient(135deg,#6366f1,#8b5cf6)"
+                        : "linear-gradient(135deg,#dc2626,#ef4444)"};
                     color:white;font-size:16px;font-weight:700;cursor:pointer;
-                    box-shadow:0 4px 20px rgba(99,102,241,0.4);
+                    box-shadow:0 6px 24px rgba(99,102,241,0.4);
                     transition:transform 0.15s,box-shadow 0.15s;
-                    margin-bottom:14px;">
-                    🔲 Enter Fullscreen &amp; Start Interview
+                    margin-bottom:16px;letter-spacing:0.2px;">
+                    ${inFs ? "🚀 Start My Interview" : "🔲 Try Fullscreen Again"}
                 </button>
 
+                <!-- Cancel -->
                 <button id="fs-cancel-btn" style="
                     background:none;border:none;color:#475569;font-size:12px;
-                    cursor:pointer;transition:color 0.15s;text-decoration:underline;">
-                    Cancel — go back
+                    cursor:pointer;transition:color 0.15s;text-decoration:underline;
+                    padding:4px;">
+                    Cancel — exit and go back
                 </button>
             </div>`;
 
         document.body.appendChild(overlay);
 
-        document.getElementById("fs-enter-btn").addEventListener("click", async () => {
-            await enterFullscreen();
-            await new Promise(r => setTimeout(r, 120));
+        document.getElementById("fs-proceed-btn").addEventListener("click", async () => {
+            if (!isInFullscreen()) {
+                // Retry fullscreen
+                await enterFullscreen();
+                await new Promise(r => setTimeout(r, 150));
+            }
 
             if (isInFullscreen()) {
                 fullscreenActive = true;
                 overlay.remove();
                 resolve();
             } else {
-                const btn = document.getElementById("fs-enter-btn");
+                const btn = document.getElementById("fs-proceed-btn");
                 if (btn) {
-                    btn.textContent = "⚠️ Fullscreen denied — try again";
-                    btn.style.background = "linear-gradient(135deg,#dc2626,#ef4444)";
+                    btn.textContent       = "⚠️ Still blocked — check browser permissions";
+                    btn.style.background  = "linear-gradient(135deg,#b45309,#d97706)";
                 }
             }
         });
 
-        document.getElementById("fs-cancel-btn").addEventListener("click", () => {
+        document.getElementById("fs-cancel-btn").addEventListener("click", async () => {
+            try { await document.exitFullscreen(); } catch {}
             overlay.remove();
             reject(new Error("User cancelled fullscreen gate"));
         });
+
+        if (inFs) {
+            fullscreenActive = true;
+        }
     });
 }
-
 
 // FULLSCREEN API HELPERS
 
