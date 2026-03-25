@@ -639,7 +639,7 @@ from app.repository import db_start_session, db_save_answer, db_complete_session
 from app.core.thread_pool import run_in_thread
 from app.core.rate_limiter import check_ws_rate_limit
 from app.services.session_auth import verify_session_token, delete_session_token
-
+from app.services.interview_state import get_session as _check_session
 router = APIRouter()
 
 
@@ -987,8 +987,8 @@ async def interview_ws(
                         session.current_topic, classification
                     )
                     session.expecting_answer = False
-
-            _save_session(session_id, session)
+            if get_session(session_id) is not None:
+                _save_session(session_id, session)
 
             # DB save in background
             asyncio.create_task(
@@ -1012,7 +1012,9 @@ async def interview_ws(
                 print(f"[WS {session_id}] Question generation failed: {e}")
                 next_q = None
 
-            _save_session(session_id, session)
+            if get_session(session_id) is not None:
+                _save_session(session_id, session)
+
             print(f"[PERF] Question in {time.time() - t0:.2f}s")
 
             if not next_q:
@@ -1156,6 +1158,22 @@ async def interview_ws(
             if action == "PING":
                 continue
 
+            # Guard: reject all actions if session deleted from redis
+
+            if not _check_session(session_id):
+                print(f"[WS {session_id}] Session no longer exists in Redis — closing")
+                await safe_send_json({
+                    "Type" : "ERROR",
+                    "text" : "This interview has already been submitted and cannot be continued. "
+                })
+                socket_open = False
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+                break
+
+
             elif action == "SUBMIT_ANSWER":
                 if not session.expecting_answer or is_processing:
                     print(
@@ -1243,7 +1261,7 @@ async def interview_ws(
             return
 
         try:
-            if not session.is_finalized:
+            if not session.is_finalized and get_session(session_id) is not None:
                 _save_session(session_id, session)
                 print(
                     f"[WS {session_id}] State preserved in Redis "
